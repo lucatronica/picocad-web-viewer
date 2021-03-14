@@ -1,7 +1,9 @@
-WebGL viewer for picoCAD scenes.
+## WebGL viewer for picoCAD scenes.
 
-TODO:
+## [Demo viewer: https://lucatronica.github.io/picocad-web-viewer/](https://lucatronica.github.io/picocad-web-viewer/)
 
-* Shading w/ per-face shading configuration
+### TODO:
+
+* Shading, using picoCAD's per-face shading options
+* Option that attempts to fix Z-fighting
 * Object rotation property ("rot")
-* Option to try fix Z-fighting with coplanar faces
