@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<style>
+		* {
+			box-sizing: border-box;
+		}
+
+		:root {
+			--bg: #383838;
+			--fg: #fff;
+		}
+
+		body {
+			background: var(--bg);
+			color: var(--fg);
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+		}
+
+		.drag {
+			outline: 4px dashed #00ff88;
+			outline-offset: 0px;
+		}
+
+		canvas {
+			image-rendering: -moz-crisp-edges;
+			image-rendering: pixelated;
+			display: block;
+		}
+
+		#viewport {
+			cursor: pointer;
+			margin: 0 auto 10px;
+		}
+
+		#controls {
+			max-width: 1000px;
+			margin: 0 auto 20px;
+		}
+
+		output {
+			opacity: 0.6;
+		}
+
+		#stats {
+			max-width: 1000px;
+			margin: 0 auto 20px;
+		}
+
+		#stats-row {
+			display: flex;
+		}
+
+		#texture {
+			width: 256px;
+			margin-right: 10px;
+			background: #000;
+		}
+
+		#stats ul {
+			list-style: none;
+			padding: 0;
+			margin: 0;
+		}
+
+		summary {
+			margin-bottom: 10px;
+		}
+	</style>
+	<title>picoCAD Viewer</title>
+</head>
+<body>
+	<!-- <canvas id="viewport" width="128" height="128" style="width: 768px;"></canvas> -->
+	<canvas id="viewport" width="1280" height="720" style="width: 100%; max-width: 1280px;"></canvas>
+	<div id="controls">
+		<div>
+			<label>
+				Resolution
+				<select id="input-resolution">
+					<option value="128,128,1">128 x 128</option>
+					<option value="128,128,2">128 x 128 (x2)</option>
+					<option value="128,128,3">128 x 128 (x3)</option>
+					<option value="128,128,4">128 x 128 (x4)</option>
+					<option value="128,128,5" selected>128 x 128 (x5)</option>
+					<option value="128,128,6">128 x 128 (x6)</option>
+					<option value="192,192,1">192 x 192</option>
+					<option value="192,192,2">192 x 192 (x2)</option>
+					<option value="192,192,3">192 x 192 (x3)</option>
+					<option value="192,192,4">192 x 192 (x4)</option>
+					<option value="256,256,1">256 x 256</option>
+					<option value="256,256,2">256 x 256 (x2)</option>
+					<option value="256,256,3">256 x 256 (x3)</option>
+					<option value="512,512,1">512 x 512</option>
+					<option value="1280,720,1">1280 x 720</option>
+				</select>
+			</label>
+		</div>
+		<div>
+			<label>
+				Camera mode
+				<select id="input-camera-mode">
+					<option value="0">Turntable</option>
+					<option value="1">First-person</option>
+				</select>
+				<output></output>
+			</label>
+		</div>
+		<div>
+			<label>
+				Camera FOV
+				<input id="input-fov" type="range" min="1" max="179" step="1" value="40">
+				<output></output>
+			</label>
+		</div>
+	</div>
+	<details id="stats">
+		<summary>Model information</summary>
+		<div id="stats-row">
+			<canvas id="texture" width="128" height="120"></canvas>
+			<ul>
+				<li id="stat-face-count"></li>
+				<li id="stat-triangle-count"></li>
+				<li id="stat-color-count"></li>
+			</ul>
+		</div>
+	</details>
+	<script type="module" src="index.js"></script>
+</body>
+</html>

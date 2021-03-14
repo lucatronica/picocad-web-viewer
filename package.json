@@ -1,0 +1,32 @@
+{
+  "name": "picocad-web-viewer",
+  "version": "1.0.0",
+  "description": "WebGL viewer for picoCAD scenes.",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "rollup src/index.js --file dist/pico-cad-viewer.js --format esm"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lucatronica/picocad-web-viewer.git"
+  },
+  "keywords": [
+    "picoCAD",
+    "pico8",
+    "pico-8"
+  ],
+  "author": "Luca Harris",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/lucatronica/picocad-web-viewer/issues"
+  },
+  "homepage": "https://github.com/lucatronica/picocad-web-viewer#readme",
+  "dependencies": {
+    "gl-matrix": "^3.3.0"
+  },
+  "devDependencies": {
+    "rollup": "^2.41.2"
+  }
+}
