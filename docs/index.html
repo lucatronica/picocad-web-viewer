@@ -11,7 +11,10 @@
 
 		:root {
 			--bg: #383838;
+			--bg2: #404040;
 			--fg: #fff;
+			--border: #606060;
+			--border2: #505050;
 		}
 
 		body {
@@ -31,102 +34,121 @@
 			display: block;
 		}
 
-		#viewport {
-			cursor: pointer;
-			margin: 0 auto 10px;
+		label {
+			display: inline-flex;
+			align-items: center;
+			margin: 0 0 6px;
+		}
+		label:nth-of-type(n+2) {
+			margin-left: 8px;
+		}
+		label > * {
+			margin: 0 0 0 6px;
 		}
 
-		#controls {
-			max-width: 1000px;
-			margin: 0 auto 20px;
+		#viewport {
+			margin: 0 auto 10px;
+			background: #000;
+		}
+		#viewport.clickable {
+			cursor: pointer;
 		}
 
 		output {
 			opacity: 0.6;
 		}
 
-		#stats {
-			max-width: 1000px;
+		#info {
+			max-width: 700px;
 			margin: 0 auto 20px;
-		}
-
-		#stats-row {
 			display: flex;
+		}
+		#info-details {
+			width: 100%;
 		}
 
 		#texture {
 			width: 256px;
 			margin-right: 10px;
 			background: #000;
+			flex-shrink: 0;
 		}
 
-		#stats ul {
-			list-style: none;
-			padding: 0;
+		#controls {
+			max-width: 1000px;
+			margin: 0 auto 8px;
+			padding-bottom: 6px;
+			border-bottom: 2px solid var(--border);
+		}
+
+		#stats {
 			margin: 0;
-		}
-
-		summary {
-			margin-bottom: 10px;
+			padding: 0;
+			list-style: none;
 		}
 	</style>
 	<title>picoCAD Viewer</title>
 </head>
 <body>
 	<!-- <canvas id="viewport" width="128" height="128" style="width: 768px;"></canvas> -->
-	<canvas id="viewport" width="1280" height="720" style="width: 100%; max-width: 1280px;"></canvas>
-	<div id="controls">
-		<div>
-			<label>
-				Resolution
-				<select id="input-resolution">
-					<option value="128,128,1">128 x 128</option>
-					<option value="128,128,2">128 x 128 (x2)</option>
-					<option value="128,128,3">128 x 128 (x3)</option>
-					<option value="128,128,4">128 x 128 (x4)</option>
-					<option value="128,128,5" selected>128 x 128 (x5)</option>
-					<option value="128,128,6">128 x 128 (x6)</option>
-					<option value="192,192,1">192 x 192</option>
-					<option value="192,192,2">192 x 192 (x2)</option>
-					<option value="192,192,3">192 x 192 (x3)</option>
-					<option value="192,192,4">192 x 192 (x4)</option>
-					<option value="256,256,1">256 x 256</option>
-					<option value="256,256,2">256 x 256 (x2)</option>
-					<option value="256,256,3">256 x 256 (x3)</option>
-					<option value="512,512,1">512 x 512</option>
-					<option value="1280,720,1">1280 x 720</option>
-				</select>
-			</label>
-		</div>
-		<div>
-			<label>
-				Camera mode
-				<select id="input-camera-mode">
-					<option value="0">Turntable</option>
-					<option value="1">First-person</option>
-				</select>
-				<output></output>
-			</label>
-		</div>
-		<div>
-			<label>
-				Camera FOV
-				<input id="input-fov" type="range" min="1" max="179" step="1" value="40">
-				<output></output>
-			</label>
+	<canvas id="viewport" width="128" height="128" style="width: 100%; max-width: 640;"></canvas>
+	<div id="info">
+		<canvas id="texture" width="128" height="120"></canvas>
+		<div id="info-details">
+			<div id="controls">
+				<div>
+					<label>
+						Resolution
+						<select id="input-resolution">
+							<option value="128,128,1">128 x 128</option>
+							<option value="128,128,2">128 x 128 (x2)</option>
+							<option value="128,128,3">128 x 128 (x3)</option>
+							<option value="128,128,4">128 x 128 (x4)</option>
+							<option value="128,128,5" selected>128 x 128 (x5)</option>
+							<option value="128,128,6">128 x 128 (x6)</option>
+							<option value="192,192,1">192 x 192</option>
+							<option value="192,192,2">192 x 192 (x2)</option>
+							<option value="192,192,3">192 x 192 (x3)</option>
+							<option value="192,192,4">192 x 192 (x4)</option>
+							<option value="256,256,1">256 x 256</option>
+							<option value="256,256,2">256 x 256 (x2)</option>
+							<option value="256,256,3">256 x 256 (x3)</option>
+							<option value="512,512,1">512 x 512</option>
+							<option value="768,768,1">768 x 768</option>
+							<option value="1280,720,1">1280 x 720</option>
+						</select>
+					</label>
+				</div>
+				<div>
+					<label>
+						Wireframe
+						<input id="input-wireframe" type="checkbox">
+					</label>
+					<label>
+						Color
+						<input id="input-wireframe-color" type="color" value="#ffffff">
+					</label>
+				</div>
+				<div>
+					<label>
+						Render style
+						<select id="input-style">
+							<option value="">None</option>
+							<option value="flat" selected>Flat</option>
+						</select>
+					</label>
+				</div>
+				<div>
+					<label>
+						Camera FOV
+						<input id="input-fov" type="range" min="1" max="179" step="1" value="40">
+						<output></output>
+					</label>
+				</div>
+			</div>
+			<ul id="stats"></ul>
 		</div>
 	</div>
-	<details id="stats">
-		<summary>Model information</summary>
-		<div id="stats-row">
-			<canvas id="texture" width="128" height="120"></canvas>
-			<ul>
-				<li id="stat-face-count"></li>
-				<li id="stat-triangle-count"></li>
-				<li id="stat-color-count"></li>
-			</ul>
-		</div>
-	</details>
 	<script type="module" src="index.js"></script>
 </body>
 </html>

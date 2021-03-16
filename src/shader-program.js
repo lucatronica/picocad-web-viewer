@@ -17,10 +17,13 @@ export class ShaderProgram {
 		gl.attachShader(this.program, fs);
 		gl.linkProgram(this.program);
 
+		gl.deleteShader(vs);
+		gl.deleteShader(fs);
+
 		if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
 			const msg = gl.getProgramInfoLog(this.program);
 			gl.deleteProgram(this.program);
-			throw msg;
+			throw Error("program compilation failed: " + msg);
 		}
 
 		this.vertexLocation = this.getAttribLocation("vertex");
@@ -42,7 +45,7 @@ export class ShaderProgram {
 		if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
 			const msg = gl.getShaderInfoLog(shader);
 			gl.deleteShader(shader);
-			throw msg;
+			throw Error(`${type === gl.FRAGMENT_SHADER ? "fragment" : "vertex"} shader compilation failed: ${msg}`);
 		}
 
 		return shader;
@@ -60,5 +63,13 @@ export class ShaderProgram {
 	 */
 	getUniformLocation(name) {
 		return this.gl.getUniformLocation(this.program, name);
+	}
+
+	use() {
+		this.gl.useProgram(this.program);
+	}
+	
+	free() {
+		this.gl.deleteProgram(this.program);
 	}
 }

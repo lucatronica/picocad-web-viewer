@@ -4,11 +4,11 @@ import PicoCADViewer from "./pico-cad-viewer.js";
 const texCanvas = /** @type {HTMLCanvasElement} */(document.getElementById("texture"));
 const viewportCanvas = /** @type {HTMLCanvasElement} */(document.getElementById("viewport"));
 const inputResolution = /** @type {HTMLSelectElement} */(document.getElementById("input-resolution"));
-const inputCameraMode = /** @type {HTMLSelectElement} */(document.getElementById("input-camera-mode"));
+const inputWireframe = /** @type {HTMLInputElement} */(document.getElementById("input-wireframe"));
+const inputWireframeColor = /** @type {HTMLInputElement} */(document.getElementById("input-wireframe-color"));
+const inputStyle = /** @type {HTMLSelectElement} */(document.getElementById("input-style"));
 const inputFOV = /** @type {HTMLInputElement} */(document.getElementById("input-fov"));
-const statColorCount = document.getElementById("stat-color-count");
-const statFaceCount = document.getElementById("stat-face-count");
-const statTriangleCount = document.getElementById("stat-triangle-count");
+const statsTable = document.getElementById("stats");
 
 // Create viewer
 const pcv = new PicoCADViewer({
@@ -21,6 +21,7 @@ let cameraSpin = -Math.PI / 2;
 let cameraRoll = 0.2;
 let cameraRadius = 12;
 let cameraTurntableSpeed = 0.75;
+let cameraTurntableY = 1.5;
 let cameraMode = 0;
 
 
@@ -31,11 +32,24 @@ const texCanvasCtx = texCanvas.getContext("2d");
 function loadedModel() {
 	cameraRadius = pcv.model.zoomLevel;
 	
+	viewportCanvas.classList.add("clickable");
+
 	texCanvasCtx.putImageData(pcv.model.texture, 0, 0);
 
-	statColorCount.textContent = `Colors: ${pcv.getTextureColorCount()}`;
-	statTriangleCount.textContent = `Triangles: ${pcv.getTriangleCount()}`;
-	statFaceCount.textContent = `Faces: ${pcv.model.faceCount}`;
+	while (statsTable.lastChild != null) statsTable.lastChild.remove();
+
+	statsTable.append(h("li", {}, pcv.model.name));
+
+	const stats = {
+		"Colors": pcv.getTextureColorCount(),
+		"Objects": pcv.model.objectCount,
+		"Faces": pcv.model.faceCount,
+		"Triangles": pcv.getTriangleCount(),
+	};
+
+	for (const [key, value] of Object.entries(stats)) {
+		statsTable.append(h("li", {}, `${key}: ${value}`));
+	}
 }
 
 
@@ -46,7 +60,13 @@ const keys = Object.create(null);
 window.onkeydown = event => {
 	if (!event.ctrlKey && !event.metaKey) {
 		event.preventDefault();
-		keys[event.key.toLowerCase()] = true;
+		const key = event.key.toLowerCase();
+		keys[key] = true;
+
+		// down handlers
+		if (key === "t") {
+			inputWireFrameHandler(!pcv.drawWireframe);
+		}
 	}
 };
 window.onkeyup = event => {
@@ -57,7 +77,17 @@ window.onkeyup = event => {
 };
 
 viewportCanvas.onclick = () => {
-	viewportCanvas.requestPointerLock();
+	if (pcv.loaded) {
+		viewportCanvas.requestPointerLock();
+	}
+};
+
+document.onpointerlockchange = (event) => {
+	if (document.pointerLockElement === viewportCanvas) {
+		cameraMode = 1;
+	} else {
+		cameraMode = 0;
+	}
 };
 
 window.onmousemove = (event) => {
@@ -72,40 +102,45 @@ window.onmousemove = (event) => {
 viewportCanvas.onwheel = (event) => {
 	event.preventDefault();
 
-	if (cameraMode === 0) {
-		cameraRadius = clamp(0, 200, cameraRadius + event.deltaY * (event.shiftKey ? 0.4 : 0.2));
-	} else if (cameraMode === 1) {
-		inputFOV.valueAsNumber += event.deltaY;
-		inputFOVUpdate();
+	if (cameraMode === 1 || (cameraMode === 0 && event.shiftKey)) {
+		inputFOVUpdate(pcv.cameraFOV + event.deltaY);
+	} else if (cameraMode === 0) {
+		cameraRadius = clamp(0, 200, cameraRadius + event.deltaY * 0.2);
 	}
 };
 
-const inputCameraModeUpdate = () => {
-	cameraMode = Number(inputCameraMode.value);
-	inputCameraMode.nextElementSibling.textContent = [
-		"Arrows to adjust speed and angle. Mousewheel to zoom.",
-		"WASD, shift, space, arrows. Click viewport to use mouse aim.",
-	][cameraMode];
-};
-inputCameraMode.onchange = inputCameraModeUpdate;
-inputCameraModeUpdate();
-
-const inputResolutionUpdate = () => {
-	const [w, h, scale] = inputResolution.value.split(",").map(s => Number(s));
+inputHandler(inputResolution, value => {
+	const [w, h, scale] = value.split(",").map(s => Number(s));
 
 	viewportCanvas.width = w;
 	viewportCanvas.height = h;
 	viewportCanvas.style.maxWidth = `${w * scale}px`;
-};
-inputResolution.onchange = inputResolutionUpdate;
-inputResolutionUpdate();
+});
 
-const inputFOVUpdate = () => {
+const inputFOVUpdate = inputHandler(inputFOV, () => {
 	pcv.cameraFOV = inputFOV.valueAsNumber;
 	inputFOV.nextElementSibling.textContent = inputFOV.value;
-};
-inputFOV.oninput = inputFOVUpdate;
-inputFOVUpdate();
+});
+
+const inputWireFrameHandler = inputHandler(inputWireframe, () => {
+	pcv.drawWireframe = inputWireframe.checked;
+});
+
+inputHandler(inputWireframeColor, (value) => {
+	pcv.wireframeColor = [
+		value.slice(1, 3),
+		value.slice(3, 5),
+		value.slice(5, 7),
+	].map(s => parseInt(s, 16) / 255);
+});
+
+inputHandler(inputStyle, value => {
+	if (value === "flat") {
+		pcv.drawModel = true;
+	} else if (value === "") {
+		pcv.drawModel = false;
+	}
+});
 
 // Render loop
 pcv.startDrawLoop((dt) => {
@@ -130,13 +165,14 @@ pcv.startDrawLoop((dt) => {
 
 	if (cameraMode === 0) {
 		// turntable
-		cameraTurntableSpeed -= inputCameraLR * 2 * dt;
+		cameraTurntableSpeed -= (inputLR + inputCameraLR) * 2 * dt;
 		cameraTurntableSpeed = clamp(-2, 2, cameraTurntableSpeed);
-		cameraRoll += inputCameraUD * lookSpeed;
+		cameraRoll += (inputFB + inputCameraUD) * lookSpeed;
+		cameraTurntableY += inputUD * 3 * dt;
 
 		cameraSpin += cameraTurntableSpeed * dt;
 
-		pcv.setTurntableCamera(cameraRadius, 1.5, cameraSpin, cameraRoll);
+		pcv.setTurntableCamera(cameraRadius, cameraTurntableY, cameraSpin, cameraRoll);
 	} else if (cameraMode === 1) {
 		// fps
 		cameraSpin += inputCameraLR * lookSpeed;
@@ -154,9 +190,9 @@ pcv.startDrawLoop((dt) => {
 			const forward = pcv.getCameraForward();
 
 			const pos = pcv.cameraPosition;
-			pos.x += (right.x * inputLR + forward.x * inputFB) * speed;
-			pos.y += (right.y * inputLR + forward.y * inputFB - inputUD) * speed;
-			pos.z += (right.z * inputLR + forward.z * inputFB) * speed;
+			pos.x += (right.x * inputLR + forward.x * inputFB + up.x * inputUD) * speed;
+			pos.y += (right.y * inputLR + forward.y * inputFB + up.y * inputUD) * speed;
+			pos.z += (right.z * inputLR + forward.z * inputFB + up.z * inputUD) * speed;
 		}
 	}
 });
@@ -212,4 +248,51 @@ document.body.addEventListener("paste", (event) => {
  */
 function clamp(a, b, x) {
 	return x < a ? a : (x > b ? b : x);
+}
+
+/**
+ * @param {string|Element} tag 
+ * @param {*} attributes 
+ * @param  {...any} nodes 
+ */
+function h(tag, attributes, ...nodes) {
+	tag = tag instanceof Element ? tag : document.createElement(tag);
+	if (attributes != null) {
+		for (const k in attributes) {
+			tag.setAttribute(k, attributes[k]);
+		}
+	}
+	tag.append(...nodes);
+	return tag;
+}
+
+/**
+ * @param {HTMLSelectElement|HTMLInputElement} input 
+ * @param {(value: string) => void} onchange
+ * @returns {(value: any) => void} Call to change value
+ */
+function inputHandler(input, onchange) {
+	function listener() {
+		onchange(input.value);
+	}
+
+	input[input instanceof HTMLSelectElement ? "onchange" : "oninput"] = listener;
+
+	listener();
+
+	if (input instanceof HTMLInputElement) {
+		return (value) => {
+			if (typeof value === "boolean") {
+				input.checked = value;
+			} else {
+				input.value = value;
+			}
+			listener();
+		};
+	} else {
+		return (value) => {
+			input.value = value;
+			listener();
+		};
+	}
 }

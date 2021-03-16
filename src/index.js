@@ -1,7 +1,7 @@
 import * as mat4 from "../node_modules/gl-matrix/esm/mat4";
 import * as vec3 from "../node_modules/gl-matrix/esm/vec3";
 import { loadPicoCADModel } from "./loader";
-import { Pass } from "./pass";
+import { Pass, WirePass } from "./pass";
 import { PICO_COLORS } from "./pico";
 import { ShaderProgram } from "./shader-program";
 
@@ -9,7 +9,11 @@ export class PicoCADViewer {
 	/**
 	 * @param {object} [options]
 	 * @param {HTMLCanvasElement} [options.canvas] The canvas to render to. If not provided one will be created.
-	 * @param {number} [options.fov] The camera FOV. Defaults to 90;
+	 * @param {number} [options.fov] The camera FOV (degrees). Defaults to 90;
+	 * @param {boolean} [options.drawModel] If the model should be drawn. Defaults to true.
+	 * @param {boolean} [options.drawWireframe] If the wireframe should be drawn. Defaults to false.
+	 * @param {number[]} [options.wireframeColor] The wireframe color as [R, G, B] (each component [0, 1]). Defaults to white.
+	 * @param {number[]} [options.wireframeXray] If the wireframe should be drawn "through" the model. Defaults to true.
 	 */
 	constructor(options={}) {
 		this.canvas = options.canvas;
@@ -39,10 +43,19 @@ export class PicoCADViewer {
 		/** The camera field-of-view in degrees. */
 		this.cameraFOV = options.fov ?? 90;
 
-		/** If a model has been loaded. */
+		/** If a model has been loaded. @readonly */
 		this.loaded = false;
-		/** Information about the current model. @type {{name: string, backgroundIndex: number, zoomLevel: number, backgroundColor: number[], alphaIndex: number, alphaColor: number[], texture: ImageData, textureColorFlags: boolean[]}} */
+		/** Information about the current model. @readonly @type {{name: string, backgroundIndex: number, zoomLevel: number, backgroundColor: number[], alphaIndex: number, alphaColor: number[], texture: ImageData, textureColorFlags: boolean[]}} */
 		this.model = null;
+
+		/** If the model should be drawn. */
+		this.drawModel = options.drawModel ?? true;
+		/** If the wireframe should be drawn. */
+		this.drawWireframe = options.drawWireframe ?? false;
+		/** If the wireframe should be drawn "through" the model. */
+		this.wireframeXray = options.wireframeXray ?? true;
+		/** The wireframe color as [R, G, B] (each component [0, 1]). */
+		this.wireframeColor = options.wireframeColor ?? [1, 1, 1];
 
 		/** @private @type {Pass[]} */
 		this._passes = [];
@@ -52,12 +65,13 @@ export class PicoCADViewer {
 		this._programColor = createColorProgram(this.gl);
 		/** @private */
 		this._programTexture = createTextureProgram(this.gl);
+		/** @private @type {WirePass} */
+		this._wireframe = null;
+		/** @private */
+		this._programWireframe = createWireframeProgram(this.gl);
 
 		// Init GL.
 		const gl = this.gl;
-
-		gl.clearColor(0, 0, 0, 1);
-		gl.clear(gl.COLOR_BUFFER_BIT);
 
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(gl.LEQUAL);
@@ -130,11 +144,20 @@ export class PicoCADViewer {
 	_loadString(source) {
 		const gl = this.gl;
 
-		// Free old resources.
-		this.loaded = false;
-		for (const pass of this._passes) {
-			pass.free();
+		// Free old model resources.
+		if (this.loaded) {
+			for (const pass of this._passes) {
+				pass.free();
+			}
+			this._passes = [];
+
+			this._wireframe.free();
+
+			gl.deleteTexture(this._mainTex);
+			this._mainTex = null;
 		}
+
+		this.loaded = false;
 
 		// Load the model.
 		const model = loadPicoCADModel(this.gl, source);
@@ -152,6 +175,7 @@ export class PicoCADViewer {
 			objectCount: model.objectCount,
 		};
 		this._passes = model.passes;
+		this._wireframe = model.wireframe;
 
 		// Upload GL texture.
 		if (this._mainTex == null) {
@@ -179,7 +203,7 @@ export class PicoCADViewer {
 	 * Draw the scene once.
 	 */
 	draw() {
-		if (!this.loaded) {
+		if (!this.loaded || (!this.drawModel && !this.drawWireframe)) {
 			return;
 		}
 
@@ -209,81 +233,148 @@ export class PicoCADViewer {
 		mat4.rotateZ(mat, mat, this.cameraRotation.z);
 		mat4.translate(mat, mat, [ this.cameraPosition.x, this.cameraPosition.y, this.cameraPosition.z ]);
 
-		// Render each pass
-		for (const pass of this._passes) {
-			if (pass.clearDepth) {
+		// Draw model
+		if (this.drawModel) {
+			// Render each pass
+			for (const pass of this._passes) {
+				if (pass.clearDepth) {
+					gl.clear(gl.DEPTH_BUFFER_BIT);
+				}
+
+				if (pass.isEmpty()) {
+					continue;
+				}
+
+				const programInfo = pass.useTexture ? this._programTexture : this._programColor;
+
+				programInfo.program.use();
+
+				// Uniforms
+				gl.uniformMatrix4fv(
+					programInfo.program.mvpLocation,
+					false,
+					mat,
+				);
+		
+				if (programInfo === this._programTexture) {
+					// Main texture
+					gl.activeTexture(gl.TEXTURE0);
+					gl.bindTexture(gl.TEXTURE_2D, this._mainTex);
+					gl.uniform1i(this._programTexture.locations.mainTex, 0);
+
+					// UV attrib
+					gl.bindBuffer(gl.ARRAY_BUFFER, pass.uvBuffer);
+					gl.vertexAttribPointer(
+						this._programTexture.locations.uv,
+						2,
+						gl.FLOAT,
+						false,
+						0,
+						0,
+					);
+					gl.enableVertexAttribArray(this._programTexture.locations.uv);
+				} else if (programInfo === this._programColor) {
+					// Color attrib
+					gl.bindBuffer(gl.ARRAY_BUFFER, pass.colorBuffer);
+					gl.vertexAttribPointer(
+						this._programColor.locations.color,
+						4,
+						gl.FLOAT,
+						false,
+						0,
+						0,
+					);
+					gl.enableVertexAttribArray(this._programColor.locations.color);
+				}
+
+				// Bind vertex data
+				gl.bindBuffer(gl.ARRAY_BUFFER, pass.vertexBuffer);
+				gl.vertexAttribPointer(
+					programInfo.program.vertexLocation,
+					3,
+					gl.FLOAT,
+					false,
+					0,
+					0,
+				);
+				gl.enableVertexAttribArray(programInfo.program.vertexLocation);
+
+				// Configure culling
+				if (pass.cull) {
+					gl.enable(gl.CULL_FACE);
+				} else {
+					gl.disable(gl.CULL_FACE);
+				}
+
+				// Draw!
+				gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, pass.triangleBuffer);
+
+				gl.drawElements(gl.TRIANGLES, pass.vertexCount, gl.UNSIGNED_SHORT, 0);
+
+				// Clean up attributes
+				gl.disableVertexAttribArray(programInfo.program.vertexLocation);
+
+				if (programInfo === this._programTexture) {
+					gl.disableVertexAttribArray(this._programTexture.locations.uv);
+				} else if (programInfo === this._programColor) {
+					gl.disableVertexAttribArray(this._programColor.locations.color);
+				}
+			}
+		}
+
+		// Draw wireframe
+		if (this.drawWireframe) {
+			if (this.drawModel && this.wireframeXray) {
 				gl.clear(gl.DEPTH_BUFFER_BIT);
 			}
 
-			if (pass.isEmpty()) {
-				continue;
-			}
-
-			const programInfo = pass.useTexture ? this._programTexture : this._programColor;
-
-			gl.useProgram(programInfo.program.program);
+			this._programWireframe.program.use();
 
 			// Uniforms
 			gl.uniformMatrix4fv(
-				programInfo.program.mvpLocation,
+				this._programWireframe.program.mvpLocation,
 				false,
 				mat,
 			);
-	
-			if (programInfo === this._programTexture) {
-				// Main texture
-				gl.activeTexture(gl.TEXTURE0);
-				gl.bindTexture(gl.TEXTURE_2D, this._mainTex);
-				gl.uniform1i(this._programTexture.locations.mainTex, 0);
 
-				// UV attrib
-				gl.bindBuffer(gl.ARRAY_BUFFER, pass.uvBuffer);
-				gl.vertexAttribPointer(
-					this._programTexture.locations.uv,
-					2,
-					gl.FLOAT,
-					false,
-					0,
-					0,
-				);
-				gl.enableVertexAttribArray(this._programTexture.locations.uv);
-			} else if (programInfo === this._programColor) {
-				// Color attrib
-				gl.bindBuffer(gl.ARRAY_BUFFER, pass.colorBuffer);
-				gl.vertexAttribPointer(
-					this._programColor.locations.color,
-					4,
-					gl.FLOAT,
-					false,
-					0,
-					0,
-				);
-				gl.enableVertexAttribArray(this._programColor.locations.color);
-			}
+			gl.uniform4fv(
+				this._programWireframe.locations.color,
+				[
+					this.wireframeColor[0],
+					this.wireframeColor[1],
+					this.wireframeColor[2],
+					1
+				],
+			);
 
 			// Bind vertex data
-			gl.bindBuffer(gl.ARRAY_BUFFER, pass.vertexBuffer);
+			gl.bindBuffer(gl.ARRAY_BUFFER, this._wireframe.vertexBuffer);
 			gl.vertexAttribPointer(
-				programInfo.program.vertexLocation,
+				this._programWireframe.program.vertexLocation,
 				3,
 				gl.FLOAT,
 				false,
 				0,
 				0,
 			);
-			gl.enableVertexAttribArray(programInfo.program.vertexLocation);
+			gl.enableVertexAttribArray(this._programWireframe.program.vertexLocation);
 
-			// Conifgure culling
-			if (pass.cull) {
-				gl.enable(gl.CULL_FACE);
-			} else {
-				gl.disable(gl.CULL_FACE);
-			}
+			gl.drawArrays(gl.LINES, 0, this._wireframe.vertexCount);
+		}
 
-			// Draw!
-			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, pass.triangleBuffer);
-
-			gl.drawElements(gl.TRIANGLES, pass.vertexCount, gl.UNSIGNED_SHORT, 0);
+		// Check if any errors occurred.
+		const error = gl.getError();
+		if (error !== 0) {
+			throw Error(
+				({
+					[gl.INVALID_ENUM]: "Invalid enum",
+					[gl.INVALID_VALUE]: "Invalid value",
+					[gl.INVALID_OPERATION]: "Invalid operation",
+					[gl.INVALID_FRAMEBUFFER_OPERATION]: "Invalid framebuffer operation",
+					[gl.OUT_OF_MEMORY]: "Out of memory",
+					[gl.CONTEXT_LOST_WEBGL]: "Lost context",
+				})[error] ?? "Unknown WebGL Error"
+			);
 		}
 	}
 
@@ -397,6 +488,8 @@ export class PicoCADViewer {
 	 * Frees resources used by this viewer.
 	 */
 	free() {
+		const gl = this.gl;
+		
 		this.stopDrawLoop();
 
 		for (const pass of this._passes) {
@@ -404,13 +497,14 @@ export class PicoCADViewer {
 		}
 		this._passes = [];
 
-		this.gl.deleteTexture(this._mainTex);
-		this.gl = null;
+		gl.deleteTexture(this._mainTex);
 
-		this.gl.deleteProgram(this._programColor.program);
-		this.gl.deleteProgram(this._programTexture.program);
+		this._programColor.program.free();
+		this._programTexture.program.free();
+		this._programWireframe.program.free();
 		this._programColor = null;
 		this._programTexture = null;
+		this._programWireframe = null;
 	}
 }
 export default PicoCADViewer;
@@ -480,6 +574,34 @@ function createColorProgram(gl) {
 		program: program,
 		locations: {
 			color: program.getAttribLocation("col"),
+		}
+	};
+}
+
+/**
+ * @param {WebGLRenderingContext} gl 
+ */
+ function createWireframeProgram(gl) {
+	const program = new ShaderProgram(gl, `
+		attribute vec4 vertex;
+
+		uniform mat4 mvp;
+
+		void main() {
+			gl_Position = mvp * vertex;
+		}
+	`, `
+		uniform lowp vec4 color;
+
+		void main() {
+			gl_FragColor = color;
+		}
+	`);
+	
+	return {
+		program: program,
+		locations: {
+			color: program.getUniformLocation("color"),
 		}
 	};
 }

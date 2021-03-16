@@ -6,7 +6,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "rollup src/index.js --file dist/pico-cad-viewer.js --format esm"
+    "build": "rollup src/index.js --file dist/pico-cad-viewer.js --format esm",
+    "watch": "rollup src/index.js --file dist/pico-cad-viewer.js --format esm --watch"
   },
   "repository": {
     "type": "git",

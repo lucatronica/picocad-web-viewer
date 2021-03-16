@@ -82,3 +82,32 @@ export class Pass {
 		}
 	}
 }
+
+export class WirePass {
+	/**
+	 * 
+	 * @param {WebGLRenderingContext} gl 
+	 */
+	constructor(gl) {
+		this.gl = gl;
+
+		/** @type {number[]} */
+		this.vertices = [];
+	}
+
+	save() {
+		const gl = this.gl;
+
+		this.vertexCount = Math.floor(this.vertices.length / 3);
+
+		this.vertexBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.vertices), gl.STATIC_DRAW);
+
+		this.vertices = null;
+	}
+
+	free() {
+		this.gl.deleteBuffer(this.vertexBuffer);
+	}
+}

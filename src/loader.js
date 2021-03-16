@@ -1,7 +1,7 @@
 import { parsePicoCADData } from "./parser-data";
 import { parsePicoCADTexture } from "./parser-texture";
 import { readLine, splitString } from "./parser-utils";
-import { Pass } from "./pass";
+import { Pass, WirePass } from "./pass";
 import { PICO_COLORS } from "./pico";
 
 /**
@@ -24,7 +24,7 @@ export function loadPicoCADModel(gl, source) {
 
 	// Read data.
 	const data = parsePicoCADData(dataStr);
-	const { passes, faceCount, objectCount } = loadModel(gl, data);
+	const { passes, faceCount, objectCount, wireframe } = loadModel(gl, data);
 
 	// Read texture.
 	const tex = parsePicoCADTexture(readLine(texStr)[1], alphaIndex);
@@ -35,6 +35,7 @@ export function loadPicoCADModel(gl, source) {
 		backgroundIndex: bgIndex,
 		alphaIndex: alphaIndex,
 		passes: passes,
+		wireframe: wireframe,
 		texture: tex.data,
 		textureFlags: tex.flags,
 		faceCount: faceCount,
@@ -55,6 +56,9 @@ function loadModel(gl, rawModel) {
 	const pCull = new Pass(gl, { cull: true, useTexture: false });
 	const pTexture = new Pass(gl, { cull: false, useTexture: true });
 	const p = new Pass(gl, { cull: false, useTexture: false });
+
+	const wireframePass = new WirePass(gl);
+	const wireframeVertices = wireframePass.vertices;
 
 	let faceCount = 0;
 
@@ -127,7 +131,14 @@ function loadModel(gl, rawModel) {
 			// Save vertices used by this face.
 			for (let i = 0; i < faceIndices.length; i++) {
 				const vertex = rawVertices[faceIndices[i] - 1];
+				const vertex2 = rawVertices[faceIndices[i === 0 ? faceIndices.length - 1 : i - 1] - 1];
+
 				vertices.push(vertex[0], vertex[1], vertex[2]);
+
+				wireframeVertices.push(
+					vertex2[0], vertex2[1], vertex2[2],
+					vertex[0], vertex[1], vertex[2],
+				);
 			}
 
 			if (pass.useTexture) {
@@ -163,7 +174,7 @@ function loadModel(gl, rawModel) {
 		}
 	}
 
-	// Init and return pases.
+	// Init and return passes.
 	const passes = [
 		pPriorityCullTexture,
 		pPriorityCull,
@@ -179,8 +190,11 @@ function loadModel(gl, rawModel) {
 		pass.save();
 	}
 
+	wireframePass.save();
+
 	return {
 		passes: passes,
+		wireframe: wireframePass,
 		faceCount: faceCount,
 		objectCount: rawModel.array.length,
 	};
