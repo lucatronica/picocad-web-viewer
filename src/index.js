@@ -14,6 +14,7 @@ export class PicoCADViewer {
 	 * @param {boolean} [options.drawWireframe] If the wireframe should be drawn. Defaults to false.
 	 * @param {number[]} [options.wireframeColor] The wireframe color as [R, G, B] (each component [0, 1]). Defaults to white.
 	 * @param {number[]} [options.wireframeXray] If the wireframe should be drawn "through" the model. Defaults to true.
+	 * @param {number} [options.tesselationCount] Quads can be tessellated to reduce the effect of UV distortion. Pass 1 or less to do no tessellation. Defaults to 3.
 	 */
 	constructor(options={}) {
 		this.canvas = options.canvas;
@@ -56,6 +57,8 @@ export class PicoCADViewer {
 		this.wireframeXray = options.wireframeXray ?? true;
 		/** The wireframe color as [R, G, B] (each component [0, 1]). */
 		this.wireframeColor = options.wireframeColor ?? [1, 1, 1];
+		/** Quads can be tessellated to reduce the effect of UV distortion. Pass 0 to do no tessellation. */
+		this.tesselationCount = options.tesselationCount ?? 3;
 
 		/** @private @type {Pass[]} */
 		this._passes = [];
@@ -160,7 +163,7 @@ export class PicoCADViewer {
 		this.loaded = false;
 
 		// Load the model.
-		const model = loadPicoCADModel(this.gl, source);
+		const model = loadPicoCADModel(this.gl, source, this.tesselationCount);
 
 		this.model = {
 			name: model.name,
@@ -362,20 +365,20 @@ export class PicoCADViewer {
 			gl.drawArrays(gl.LINES, 0, this._wireframe.vertexCount);
 		}
 
-		// Check if any errors occurred.
-		const error = gl.getError();
-		if (error !== 0) {
-			throw Error(
-				({
-					[gl.INVALID_ENUM]: "Invalid enum",
-					[gl.INVALID_VALUE]: "Invalid value",
-					[gl.INVALID_OPERATION]: "Invalid operation",
-					[gl.INVALID_FRAMEBUFFER_OPERATION]: "Invalid framebuffer operation",
-					[gl.OUT_OF_MEMORY]: "Out of memory",
-					[gl.CONTEXT_LOST_WEBGL]: "Lost context",
-				})[error] ?? "Unknown WebGL Error"
-			);
-		}
+		// // Check if any errors occurred.
+		// const error = gl.getError();
+		// if (error !== 0) {
+		// 	throw Error(
+		// 		({
+		// 			[gl.INVALID_ENUM]: "Invalid enum",
+		// 			[gl.INVALID_VALUE]: "Invalid value",
+		// 			[gl.INVALID_OPERATION]: "Invalid operation",
+		// 			[gl.INVALID_FRAMEBUFFER_OPERATION]: "Invalid framebuffer operation",
+		// 			[gl.OUT_OF_MEMORY]: "Out of memory",
+		// 			[gl.CONTEXT_LOST_WEBGL]: "Lost context",
+		// 		})[error] ?? "Unknown WebGL Error"
+		// 	);
+		// }
 	}
 
 	/**
@@ -517,21 +520,21 @@ export default PicoCADViewer;
 		attribute vec4 vertex;
 		attribute vec2 uv;
 
-		varying highp vec2 fuv;
+		varying highp vec2 v_uv;
 
 		uniform mat4 mvp;
 
 		void main() {
-			fuv = uv;
+			v_uv = uv;
 			gl_Position = mvp * vertex;
 		}
 	`, `
-		varying highp vec2 fuv;
+		varying highp vec2 v_uv;
 		
 		uniform sampler2D mainTex;
 
 		void main() {
-			highp vec4 col = texture2D(mainTex, fuv);
+			highp vec4 col = texture2D(mainTex, v_uv.xy);
 			if (col.a == float(0)) discard;
 			gl_FragColor = col;
 		}

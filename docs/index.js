@@ -44,8 +44,9 @@ function loadedModel() {
 		"Colors": pcv.getTextureColorCount(),
 		"Objects": pcv.model.objectCount,
 		"Faces": pcv.model.faceCount,
-		"Triangles": pcv.getTriangleCount(),
 	};
+
+	console.log(`${pcv.getTriangleCount()} triangles (including tessellated faces)`);
 
 	for (const [key, value] of Object.entries(stats)) {
 		statsTable.append(h("li", {}, `${key}: ${value}`));

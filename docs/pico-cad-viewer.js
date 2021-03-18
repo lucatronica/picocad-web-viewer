@@ -805,8 +805,9 @@ class WirePass {
 /**
  * @param {WebGLRenderingContext} gl
  * @param {string} source 
+ * @param {number} tesselationCount Pass 0 to do no tesselation
  */
-function loadPicoCADModel(gl, source) {
+function loadPicoCADModel(gl, source, tesselationCount) {
 	if (!source.startsWith("picocad;")) {
 		throw Error("Not a picoCAD file.");
 	}
@@ -822,7 +823,7 @@ function loadPicoCADModel(gl, source) {
 
 	// Read data.
 	const data = parsePicoCADData(dataStr);
-	const { passes, faceCount, objectCount, wireframe } = loadModel(gl, data);
+	const { passes, faceCount, objectCount, wireframe } = loadModel(gl, data, tesselationCount + 1);
 
 	// Read texture.
 	const tex = parsePicoCADTexture(readLine(texStr)[1], alphaIndex);
@@ -844,8 +845,9 @@ function loadPicoCADModel(gl, source) {
 /**
  * @param {WebGLRenderingContext} gl
  * @param {import("./parser-data").LuaPicoCADModel} rawModel 
+ * @param {number} tn Number of tessellations
  */
-function loadModel(gl, rawModel) {
+function loadModel(gl, rawModel, tn) {
 	const pPriorityCullTexture = new Pass(gl, { cull: true, useTexture: true });
 	const pPriorityCull = new Pass(gl, { cull: true, useTexture: false });
 	const pPriorityTexture = new Pass(gl, { cull: false, useTexture: true });
@@ -923,51 +925,129 @@ function loadModel(gl, rawModel) {
 			const vertices = pass.vertices;
 			const triangles = pass.triangles;
 
-			// Save current vertex index.
+			// Get current vertex index.
 			const vertexIndex0 = Math.floor(vertices.length / 3);
 
-			// Save vertices used by this face.
+			// Get faces vertices and uvs.
+			// Save face edges to wireframe buffer.
+			const faceVertices = [];
+			const faceUVs = [];
+
 			for (let i = 0; i < faceIndices.length; i++) {
 				const vertex = rawVertices[faceIndices[i] - 1];
 				const vertex2 = rawVertices[faceIndices[i === 0 ? faceIndices.length - 1 : i - 1] - 1];
 
-				vertices.push(vertex[0], vertex[1], vertex[2]);
+				faceVertices.push(vertex);
 
 				wireframeVertices.push(
-					vertex2[0], vertex2[1], vertex2[2],
 					vertex[0], vertex[1], vertex[2],
+					vertex2[0], vertex2[1], vertex2[2],
 				);
+
+				faceUVs.push([
+					rawUVs[i * 2] / 16,
+					rawUVs[i * 2 + 1] / 16,
+				]);
 			}
 
-			if (pass.useTexture) {
-				// Save UVs used by this face.
+			if (faceIndices.length === 4 && pass.useTexture && tn > 1) {
+				// Tesselate quad.
 				const uvs = pass.uvs;
-			
-				for (let i = 0; i < faceIndices.length; i++) {
-					uvs.push(
-						rawUVs[i * 2] / 16,
-						rawUVs[i * 2 + 1] / 16,
-					);
+
+				const c0 = faceVertices[0];
+				const c1 = faceVertices[1];
+				const c2 = faceVertices[2];
+				const c3 = faceVertices[3];
+
+				const uv0 = faceUVs[0];
+				const uv1 = faceUVs[1];
+				const uv2 = faceUVs[2];
+				const uv3 = faceUVs[3];
+
+				for (let xi = 0; xi <= tn; xi++) {
+					const xt = xi / tn;
+
+					const p0 = [
+						lerp(c0[0], c1[0], xt),
+						lerp(c0[1], c1[1], xt),
+						lerp(c0[2], c1[2], xt),
+						lerp(uv0[0], uv1[0], xt),
+						lerp(uv0[1], uv1[1], xt),
+					];
+					const p1 = [
+						lerp(c3[0], c2[0], xt),
+						lerp(c3[1], c2[1], xt),
+						lerp(c3[2], c2[2], xt),
+						lerp(uv3[0], uv2[0], xt),
+						lerp(uv3[1], uv2[1], xt),
+					];
+
+					for (let yi = 0; yi <= tn; yi++) {
+						const yt = yi / tn;
+
+						vertices.push(
+							lerp(p0[0], p1[0], yt),
+							lerp(p0[1], p1[1], yt),
+							lerp(p0[2], p1[2], yt),
+						);
+						uvs.push(
+							lerp(p0[3], p1[3], yt),
+							lerp(p0[4], p1[4], yt),
+						);
+					}
+				}
+				for (let xi = 0; xi < tn; xi++) {
+					for (let yi = 0; yi < tn; yi++) {
+						const dy = yi * (tn + 1);
+
+						// add two triangles for each subdivided quad
+						const n1 = vertexIndex0 + dy + xi + 1;
+						const n2 = vertexIndex0 + dy + xi + tn + 1;
+						triangles.push(
+							// 1
+							vertexIndex0 + dy + xi,
+							n1,
+							n2,
+							// 2
+							n2,
+							n1,
+							vertexIndex0 + dy + xi + tn + 2,
+						);
+					}
 				}
 			} else {
-				// Save color for each vertex
-				const colors = pass.colors;
-				const rgbColor = PICO_COLORS[colorIndex];
-				const glColor = [rgbColor[0] / 255, rgbColor[1] / 255, rgbColor[2] / 255];
-
-				for (let i = 0; i < faceIndices.length; i++) {
-					colors.push(glColor[0], glColor[1], glColor[2], 1);
+				// Save vertices used by this face.
+				for (const vertex of faceVertices) {
+					vertices.push(vertex[0], vertex[1], vertex[2]);
 				}
-			}
 
-			// Triangulate polygon.
-			// This just uses fan triangulation :)
-			for (let i = 0, n = faceIndices.length - 2; i < n; i++) {
-				triangles.push(
-					vertexIndex0 + 1 + i,
-					vertexIndex0,
-					vertexIndex0 + 2 + i,
-				);
+				if (pass.useTexture) {
+					// Save UVs used by this face.
+					const uvs = pass.uvs;
+				
+					for (const uv of faceUVs) {
+						uvs.push(uv[0], uv[1]);
+					}
+				} else {
+					// Save color for each vertex
+					const colors = pass.colors;
+					const rgbColor = PICO_COLORS[colorIndex];
+					const glColor = [rgbColor[0] / 255, rgbColor[1] / 255, rgbColor[2] / 255];
+
+					for (let i = 0; i < faceIndices.length; i++) {
+						colors.push(glColor[0], glColor[1], glColor[2], 1);
+					}
+				}
+
+				// Triangulate polygon.
+				// This just uses fan triangulation :)
+				for (let i = 0, n = faceIndices.length - 2; i < n; i++) {
+					triangles.push(
+						vertexIndex0 + 1 + i,
+						vertexIndex0,
+						vertexIndex0 + 2 + i,
+					);
+				}
 			}
 		}
 	}
@@ -996,6 +1076,15 @@ function loadModel(gl, rawModel) {
 		faceCount: faceCount,
 		objectCount: rawModel.array.length,
 	};
+}
+
+/**
+ * @param {number} a 
+ * @param {number} b 
+ * @param {number} t 
+ */
+function lerp(a, b, t) {
+	return a + (b - a) * t;
 }
 
 class ShaderProgram {
@@ -1082,6 +1171,7 @@ class PicoCADViewer {
 	 * @param {boolean} [options.drawWireframe] If the wireframe should be drawn. Defaults to false.
 	 * @param {number[]} [options.wireframeColor] The wireframe color as [R, G, B] (each component [0, 1]). Defaults to white.
 	 * @param {number[]} [options.wireframeXray] If the wireframe should be drawn "through" the model. Defaults to true.
+	 * @param {number} [options.tesselationCount] Quads can be tessellated to reduce the effect of UV distortion. Pass 1 or less to do no tessellation. Defaults to 3.
 	 */
 	constructor(options={}) {
 		this.canvas = options.canvas;
@@ -1124,6 +1214,8 @@ class PicoCADViewer {
 		this.wireframeXray = options.wireframeXray ?? true;
 		/** The wireframe color as [R, G, B] (each component [0, 1]). */
 		this.wireframeColor = options.wireframeColor ?? [1, 1, 1];
+		/** Quads can be tessellated to reduce the effect of UV distortion. Pass 0 to do no tessellation. */
+		this.tesselationCount = options.tesselationCount ?? 3;
 
 		/** @private @type {Pass[]} */
 		this._passes = [];
@@ -1228,7 +1320,7 @@ class PicoCADViewer {
 		this.loaded = false;
 
 		// Load the model.
-		const model = loadPicoCADModel(this.gl, source);
+		const model = loadPicoCADModel(this.gl, source, this.tesselationCount);
 
 		this.model = {
 			name: model.name,
@@ -1430,20 +1522,20 @@ class PicoCADViewer {
 			gl.drawArrays(gl.LINES, 0, this._wireframe.vertexCount);
 		}
 
-		// Check if any errors occurred.
-		const error = gl.getError();
-		if (error !== 0) {
-			throw Error(
-				({
-					[gl.INVALID_ENUM]: "Invalid enum",
-					[gl.INVALID_VALUE]: "Invalid value",
-					[gl.INVALID_OPERATION]: "Invalid operation",
-					[gl.INVALID_FRAMEBUFFER_OPERATION]: "Invalid framebuffer operation",
-					[gl.OUT_OF_MEMORY]: "Out of memory",
-					[gl.CONTEXT_LOST_WEBGL]: "Lost context",
-				})[error] ?? "Unknown WebGL Error"
-			);
-		}
+		// // Check if any errors occurred.
+		// const error = gl.getError();
+		// if (error !== 0) {
+		// 	throw Error(
+		// 		({
+		// 			[gl.INVALID_ENUM]: "Invalid enum",
+		// 			[gl.INVALID_VALUE]: "Invalid value",
+		// 			[gl.INVALID_OPERATION]: "Invalid operation",
+		// 			[gl.INVALID_FRAMEBUFFER_OPERATION]: "Invalid framebuffer operation",
+		// 			[gl.OUT_OF_MEMORY]: "Out of memory",
+		// 			[gl.CONTEXT_LOST_WEBGL]: "Lost context",
+		// 		})[error] ?? "Unknown WebGL Error"
+		// 	);
+		// }
 	}
 
 	/**
@@ -1584,21 +1676,21 @@ class PicoCADViewer {
 		attribute vec4 vertex;
 		attribute vec2 uv;
 
-		varying highp vec2 fuv;
+		varying highp vec2 v_uv;
 
 		uniform mat4 mvp;
 
 		void main() {
-			fuv = uv;
+			v_uv = uv;
 			gl_Position = mvp * vertex;
 		}
 	`, `
-		varying highp vec2 fuv;
+		varying highp vec2 v_uv;
 		
 		uniform sampler2D mainTex;
 
 		void main() {
-			highp vec4 col = texture2D(mainTex, fuv);
+			highp vec4 col = texture2D(mainTex, v_uv.xy);
 			if (col.a == float(0)) discard;
 			gl_FragColor = col;
 		}
