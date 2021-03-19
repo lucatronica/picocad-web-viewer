@@ -13,8 +13,8 @@
 			--bg: #383838;
 			--bg2: #404040;
 			--fg: #fff;
+			--fg2: #b0b0b0;
 			--border: #606060;
-			--border2: #505050;
 		}
 
 		body {
@@ -26,6 +26,14 @@
 		.drag {
 			outline: 4px dashed #00ff88;
 			outline-offset: 0px;
+		}
+
+		p {
+			margin: 0 0 2px;
+		}
+
+		a {
+			color: inherit;
 		}
 
 		canvas {
@@ -61,9 +69,12 @@
 			opacity: 0.6;
 		}
 
-		#info {
+		#info, footer {
 			max-width: 700px;
-			margin: 0 auto 20px;
+			margin: 0 auto 12px;
+		}
+
+		#info {
 			display: flex;
 		}
 		#info-details {
@@ -77,17 +88,62 @@
 			flex-shrink: 0;
 		}
 
-		#controls {
-			max-width: 1000px;
-			margin: 0 auto 8px;
-			padding-bottom: 6px;
-			border-bottom: 2px solid var(--border);
+		select {
+			border: 1px solid var(--border);
+			font: inherit;
+			color: inherit;
+			background: none;
+		}
+		input[type="color"] {
+			border: 1px solid var(--border);
+		}
+		button.link {
+			font: inherit;
+			color: inherit;
+			border: none;
+			background: none;
+			text-decoration: underline;
+			cursor: pointer;
+			padding: 0;
+			display: inline;
 		}
 
-		#stats {
+		ul {
 			margin: 0;
 			padding: 0;
 			list-style: none;
+		}
+
+		hr {
+			max-width: 30px;
+			border: none;
+			border-bottom: 2px dotted var(--border);
+			margin: 10px auto;
+		}
+
+		#stats {
+			color: var(--fg2);
+		}
+
+		footer {
+			color: var(--fg2);
+		}
+		footer li {
+			display: inline;
+		}
+
+		.popup {
+			position: fixed;
+			left: 0;
+			top: 0;
+			background: rgba(0,0,0,0.5);
+			width: 100%;
+			height: 100%;
+			padding: 20px 10px;
+		}
+		.popup > * {
+			max-width: 800px;
+			margin: auto;
 		}
 	</style>
 	<title>picoCAD Viewer</title>
@@ -120,6 +176,10 @@
 							<option value="1280,720,1">1280 x 720</option>
 						</select>
 					</label>
+					<label>
+						Turntable
+						<input id="input-auto-turn" type="checkbox" checked>
+					</label>
 				</div>
 				<div>
 					<label>
@@ -136,7 +196,8 @@
 						Render style
 						<select id="input-style">
 							<option value="">None</option>
-							<option value="flat" selected>Flat</option>
+							<!-- <option value="flat" selected>Flat</option> -->
+							<option value="lit" selected>Lit</option>
 						</select>
 					</label>
 				</div>
@@ -149,6 +210,31 @@
 				</div>
 			</div>
 			<ul id="stats"></ul>
+		</div>
+	</div>
+	<footer>
+		<ul>
+			<li><a href="https://github.com/lucatronica/picocad-web-viewer">GitHub</a></li>
+			<li><a href="https://johanpeitz.itch.io/picocad">picoCAD</a></li>
+			<li><button class="link" id="btn-show-controls">Controls</button></li>
+		</ul>
+	</footer>
+	<div class="popup" id="popup-controls" hidden>
+		<div>
+			<p>Drop a picoCAD text file onto the page to start.</p>
+			<hr>
+			<p>Use <kbd>WASD</kbd> or the arrow keys to adjust the speed and angle of the turntable.</p>
+			<p>Zoom using the scroll wheel. Hold <kbd>alt</kbd> and scroll to adjust the field-of-view.</p>
+			<p>Use <kbd>space</kbd> and <kbd>shift</kbd> to move the camera up and down.</p>
+			<p>Left click and drag to exit turntable mode and rotate the camera. Right click and drag to pan the camera.</p>
+			<hr>
+			<p>Double-click to enter first-person mode. Aim using mouse. Move using <kbd>WASD</kbd>, <kbd>Q</kbd>, <kbd>E</kbd>, <kbd>shift</kbd> and <kbd>space</kbd>.</p>
+			<hr>
+			<p>Other shortcuts:</p>
+			<ul>
+				<li><kbd>R</kbd> to toggle turntable mode</li>
+				<li><kbd>T</kbd> to toggle wireframe</li>
+			</ul>
 		</div>
 	</div>
 	<script src="index.js"></script>

@@ -4,10 +4,13 @@ import PicoCADViewer from "../src/index";
 const texCanvas = /** @type {HTMLCanvasElement} */(document.getElementById("texture"));
 const viewportCanvas = /** @type {HTMLCanvasElement} */(document.getElementById("viewport"));
 const inputResolution = /** @type {HTMLSelectElement} */(document.getElementById("input-resolution"));
+const inputAutoTurn = /** @type {HTMLInputElement} */(document.getElementById("input-auto-turn"));
 const inputWireframe = /** @type {HTMLInputElement} */(document.getElementById("input-wireframe"));
 const inputWireframeColor = /** @type {HTMLInputElement} */(document.getElementById("input-wireframe-color"));
 const inputStyle = /** @type {HTMLSelectElement} */(document.getElementById("input-style"));
 const inputFOV = /** @type {HTMLInputElement} */(document.getElementById("input-fov"));
+const btnShowControls = /** @type {HTMLButtonElement} */(document.getElementById("btn-show-controls"));
+const popupControls = document.getElementById("popup-controls")
 const statsTable = document.getElementById("stats");
 
 // Create viewer
@@ -47,12 +50,26 @@ function loadedModel() {
 		"Faces": pcv.model.faceCount,
 	};
 
-	console.log(`${pcv.getTriangleCount()} triangles (including tessellated faces)`);
+	console.log(`${pcv.getTriangleCount()} triangles`);
 
 	for (const [key, value] of Object.entries(stats)) {
 		statsTable.append(h("li", {}, `${key}: ${value}`));
 	}
 }
+
+
+// Popups
+
+document.querySelectorAll(".popup").forEach(popup => {
+	popup.addEventListener("click", () => {
+		popupControls.hidden = !popupControls.hidden;
+	});
+});
+
+
+btnShowControls.onclick = () => {
+	popupControls.hidden = !popupControls.hidden;
+};
 
 
 // Input
@@ -69,7 +86,7 @@ window.onkeydown = event => {
 		if (key === "t") {
 			inputWireFrameHandler(!pcv.drawWireframe);
 		} else if (key === "r") {
-			cameraTurntableAuto = !cameraTurntableAuto;
+			inputAutoTurnHandler(!cameraTurntableAuto)
 		}
 	}
 };
@@ -114,8 +131,8 @@ window.onmousedown = (event) => {
 
 		viewportCanvas.classList.add("grabbing");
 
-		if (cameraMode === 0) {
-			cameraTurntableAuto = false;
+		if (cameraMode === 0 && button === 0) {
+			inputAutoTurnHandler(false);
 		}
 	}
 };
@@ -164,10 +181,12 @@ window.onmousemove = (event) => {
 viewportCanvas.onwheel = (event) => {
 	event.preventDefault();
 
+	const dy = clamp(-6, 6, event.deltaY)
+
 	if (cameraMode === 1 || (cameraMode === 0 && event.altKey)) {
-		inputFOVUpdate(pcv.cameraFOV + event.deltaY);
+		inputFOVUpdate(pcv.cameraFOV + dy);
 	} else if (cameraMode === 0) {
-		cameraRadius = clamp(0, 200, cameraRadius + event.deltaY * 0.2);
+		cameraRadius = clamp(0, 200, cameraRadius + dy * 0.5);
 	}
 };
 
@@ -188,6 +207,10 @@ const inputWireFrameHandler = inputHandler(inputWireframe, () => {
 	pcv.drawWireframe = inputWireframe.checked;
 });
 
+const inputAutoTurnHandler = inputHandler(inputAutoTurn, () => {
+	cameraTurntableAuto = inputAutoTurn.checked;
+});
+
 inputHandler(inputWireframeColor, (value) => {
 	pcv.wireframeColor = [
 		value.slice(1, 3),
@@ -197,7 +220,7 @@ inputHandler(inputWireframeColor, (value) => {
 });
 
 inputHandler(inputStyle, value => {
-	if (value === "flat") {
+	if (value === "lit") {
 		pcv.drawModel = true;
 	} else if (value === "") {
 		pcv.drawModel = false;
