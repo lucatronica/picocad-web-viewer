@@ -16,6 +16,8 @@ export default class PicoCADViewer {
 	 * @param {number[]} [options.wireframeColor] The wireframe color as [R, G, B] (each component [0, 1]). Defaults to white.
 	 * @param {number[]} [options.wireframeXray] If the wireframe should be drawn "through" the model. Defaults to true.
 	 * @param {number} [options.tesselationCount] Quads can be tessellated to reduce the effect of UV distortion. Pass 1 or less to do no tessellation. Defaults to 3.
+	 * @param {boolean} [options.unlit] If all faces should be draw without lighting. Defaults to false.
+	 * @param {{x: number, y: number, z: number}} [options.lightDirection] Defaults to {x: 1, y: -1, z: 0}.
 	 */
 	constructor(options={}) {
 		this.canvas = options.canvas;
@@ -52,6 +54,8 @@ export default class PicoCADViewer {
 
 		/** If the model should be drawn. */
 		this.drawModel = options.drawModel ?? true;
+		/** If all faces should be drawn without lighting. */
+		this.unlit = options.unlit ?? false;
 		/** If the wireframe should be drawn. */
 		this.drawWireframe = options.drawWireframe ?? false;
 		/** If the wireframe should be drawn "through" the model. */
@@ -60,13 +64,8 @@ export default class PicoCADViewer {
 		this.wireframeColor = options.wireframeColor ?? [1, 1, 1];
 		/** Quads can be tessellated to reduce the effect of UV distortion. Pass 0 to do no tessellation. */
 		this.tesselationCount = options.tesselationCount ?? 3;
-
 		/** The lighting direction. Does not have to be normalized. */
-		this.lightDirection = {
-			x: 1,
-			y: 0.5,
-			z: 0,
-		}
+		this.lightDirection = options.lightDirection ?? {x: 1, y: -1, z: 0};
 
 		/** @private @type {Pass[]} */
 		this._passes = [];
@@ -298,7 +297,7 @@ export default class PicoCADViewer {
 					continue;
 				}
 
-				const programInfo = pass.lighting ? this._programTexture : this._programUnlitTexture;
+				const programInfo = (!this.unlit && pass.lighting) ? this._programTexture : this._programUnlitTexture;
 
 				programInfo.program.use();
 

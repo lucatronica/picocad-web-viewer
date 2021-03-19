@@ -222,6 +222,10 @@ inputHandler(inputWireframeColor, (value) => {
 inputHandler(inputStyle, value => {
 	if (value === "lit") {
 		pcv.drawModel = true;
+		pcv.unlit = false;
+	} else if (value === "unlit") {
+		pcv.drawModel = true;
+		pcv.unlit = true;
 	} else if (value === "") {
 		pcv.drawModel = false;
 	}
