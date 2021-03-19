@@ -653,14 +653,16 @@ const PICO_COLORS = [
 /**
  * @param {string} s 
  * @param {number} alphaIndex
- * @returns {{data: ImageData, flags: boolean[]}} A 128x128 image, and a array of 16 booleans indicating if the give color is used in the model.
+ * @returns {{data: ImageData, flags: boolean[], indices: number[]}} A 128x128 image, the  and a array of 16 booleans indicating if the give color is used in the model.
  */
 function parsePicoCADTexture(s, alphaIndex) {
 	const imgData = new ImageData(128, 128);
 	const data = imgData.data;
+	const indexArray = /** @type {number[]} */(Array(16384)).fill(255);
 	const flags = /** @type {boolean[]} */(Array(16).fill(false));
 
 	let i = 0;
+	let ti = 0;
 	let line;
 	for (let y = 0; y < 120; y++) {
 		[line, s] = readLine(s);
@@ -670,21 +672,41 @@ function parsePicoCADTexture(s, alphaIndex) {
 			
 			flags[index] = true;
 
-			if (index === alphaIndex) ; else {
+			if (index === alphaIndex) {
+				// this is transparent
+				indexArray[i] = 255;
+			} else {
+				indexArray[i] = index;
+
 				const rgb = PICO_COLORS[index];
 
-				data[i    ] = rgb[0];
-				data[i + 1] = rgb[1];
-				data[i + 2] = rgb[2];
-				data[i + 3] = 255;
+				data[ti    ] = rgb[0];
+				data[ti + 1] = rgb[1];
+				data[ti + 2] = rgb[2];
+				data[ti + 3] = 255;
 			}
 
-			i += 4;
+			i++;
+			ti += 4;
 		}
+	}
+
+	// Add hidden indices on bottom row for single color faces.
+	for (let i = 0; i < 16; i++) {
+		indexArray[16256 + i] = i;
+
+		const rgb = PICO_COLORS[i];
+
+		const ti = 65024 + i * 4;
+		data[ti    ] = rgb[0];
+		data[ti + 1] = rgb[1];
+		data[ti + 2] = rgb[2];
+		data[ti + 3] = 255;
 	}
 
 	return {
 		data: imgData,
+		indices: indexArray,
 		flags: flags,
 	};
 }
@@ -695,20 +717,20 @@ function parsePicoCADTexture(s, alphaIndex) {
 class Pass {
 	/**
 	 * @param {WebGLRenderingContext} gl
-	 * @param {{cull?: boolean, useTexture?: boolean, clearDepth?: boolean}} [options] 
+	 * @param {{cull?: boolean, lighting?: boolean, clearDepth?: boolean}} [options] 
 	 */
 	constructor(gl, options={}) {
 		this.gl = gl;
 		this.cull = options.cull ?? true;
-		this.useTexture = options.useTexture ?? true;
+		this.lighting = options.lighting ?? true;
 		this.clearDepth = options.clearDepth ?? false;
 
 		/** @type {number[]} */
 		this.vertices = [];
 		/** @type {number[]} */
-		this.uvs = [];
+		this.normals = [];
 		/** @type {number[]} */
-		this.colors = [];
+		this.uvs = [];
 		/** @type {number[]} */
 		this.triangles = [];
 	}
@@ -723,31 +745,30 @@ class Pass {
 
 		if (!this.isEmpty()) {
 			this.vertexBuffer = gl.createBuffer();
+			this.uvBuffer = gl.createBuffer();
 			this.triangleBuffer = gl.createBuffer();
-
-			if (this.useTexture) {
-				this.uvBuffer = gl.createBuffer();
-			} else {
-				this.colorBuffer = gl.createBuffer();
+			
+			if (this.lighting) {
+				this.normalBuffer = gl.createBuffer();
 			}
 
 			gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
 			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.vertices), gl.STATIC_DRAW);
 
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.uvs), gl.STATIC_DRAW);
+
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.triangleBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.triangles), gl.STATIC_DRAW);
 			
-			if (this.useTexture) {
-				gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
-				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.uvs), gl.STATIC_DRAW);
-			} else {
-				gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
-				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.colors), gl.STATIC_DRAW);
+			if (this.lighting) {
+				gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
+				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.normals), gl.STATIC_DRAW);
 			}
 		}
 
 		this.uvs = null;
-		this.colors = null;
+		this.normals = null;
 		this.vertices = null;
 		this.triangles = null;
 	}
@@ -763,19 +784,17 @@ class Pass {
 		const gl = this.gl;
 
 		gl.deleteBuffer(this.vertexBuffer);
+		gl.deleteBuffer(this.uvBuffer);
 		gl.deleteBuffer(this.triangleBuffer);
-
-		if (this.useTexture) {
-			gl.deleteBuffer(this.uvBuffer);
-		} else {
-			gl.deleteBuffer(this.colorBuffer);
+		
+		if (this.lighting) {
+			gl.deleteBuffer(this.normalBuffer);
 		}
 	}
 }
 
 class WirePass {
 	/**
-	 * 
 	 * @param {WebGLRenderingContext} gl 
 	 */
 	constructor(gl) {
@@ -837,6 +856,7 @@ function loadPicoCADModel(gl, source, tesselationCount) {
 		wireframe: wireframe,
 		texture: tex.data,
 		textureFlags: tex.flags,
+		textureIndices: tex.indices,
 		faceCount: faceCount,
 		objectCount: objectCount,
 	};
@@ -848,14 +868,14 @@ function loadPicoCADModel(gl, source, tesselationCount) {
  * @param {number} tn Number of tessellations
  */
 function loadModel(gl, rawModel, tn) {
-	const pPriorityCullTexture = new Pass(gl, { cull: true, useTexture: true });
-	const pPriorityCull = new Pass(gl, { cull: true, useTexture: false });
-	const pPriorityTexture = new Pass(gl, { cull: false, useTexture: true });
-	const pPriority = new Pass(gl, { cull: false, useTexture: false });
-	const pCullTexture = new Pass(gl, { cull: true, useTexture: true, clearDepth: true });
-	const pCull = new Pass(gl, { cull: true, useTexture: false });
-	const pTexture = new Pass(gl, { cull: false, useTexture: true });
-	const p = new Pass(gl, { cull: false, useTexture: false });
+	const pPriorityCullLit = new Pass(gl, { cull: true, lighting: true });
+	const pPriorityCull = new Pass(gl, { cull: true, lighting: false });
+	const pPriorityLit = new Pass(gl, { cull: false, lighting: true });
+	const pPriority = new Pass(gl, { cull: false, lighting: false });
+	const pCullLit = new Pass(gl, { cull: true, lighting: true, clearDepth: true });
+	const pCull = new Pass(gl, { cull: true, lighting: false });
+	const pLit = new Pass(gl, { cull: false, lighting: true });
+	const p = new Pass(gl, { cull: false, lighting: false });
 
 	const wireframePass = new WirePass(gl);
 	const wireframeVertices = wireframePass.vertices;
@@ -864,7 +884,7 @@ function loadModel(gl, rawModel, tn) {
 
 	for (const object of rawModel.array) {
 		const pos = object.dict.pos.array;
-		object.dict.rot.array;
+		// const rot = object.dict.rot.array; // unused?
 
 		const rawVertices = object.dict.v.array.map(la => {
 			const xs = la.array;
@@ -885,7 +905,7 @@ function loadModel(gl, rawModel, tn) {
 
 			const colorIndex = dict.c;
 			const doubleSided = dict.dbl === 1;
-			dict.noshade !== 1;
+			const useShading = dict.noshade !== 1;
 			const useTexture = dict.notex !== 1;
 			const priority = dict.prio === 1;
 			const rawUVs = dict.uv.array;
@@ -894,28 +914,28 @@ function loadModel(gl, rawModel, tn) {
 			let pass;
 			if (priority) {
 				if (doubleSided) {
-					if (useTexture) {
-						pass = pPriorityTexture;
+					if (useShading) {
+						pass = pPriorityLit;
 					} else {
 						pass = pPriority;
 					}
 				} else {
-					if (useTexture) {
-						pass = pPriorityCullTexture;
+					if (useShading) {
+						pass = pPriorityCullLit;
 					} else {
 						pass = pPriorityCull;
 					}
 				}
 			} else {
 				if (doubleSided) {
-					if (useTexture) {
-						pass = pTexture;
+					if (useShading) {
+						pass = pLit;
 					} else {
 						pass = p;
 					}
 				} else {
-					if (useTexture) {
-						pass = pCullTexture;
+					if (useShading) {
+						pass = pCullLit;
 					} else {
 						pass = pCull;
 					}
@@ -924,6 +944,7 @@ function loadModel(gl, rawModel, tn) {
 
 			const vertices = pass.vertices;
 			const triangles = pass.triangles;
+			const normals = pass.normals;
 
 			// Get current vertex index.
 			const vertexIndex0 = Math.floor(vertices.length / 3);
@@ -950,7 +971,11 @@ function loadModel(gl, rawModel, tn) {
 				]);
 			}
 
-			if (faceIndices.length === 4 && pass.useTexture && tn > 1) {
+			// Calculate face normal (should be same for all triangles)
+			const faceNormal = calculateFaceNormal(faceVertices);
+
+			// Get triangles
+			if (faceIndices.length === 4 && useTexture && tn > 1) {
 				// Tesselate quad.
 				const uvs = pass.uvs;
 
@@ -994,8 +1019,10 @@ function loadModel(gl, rawModel, tn) {
 							lerp(p0[3], p1[3], yt),
 							lerp(p0[4], p1[4], yt),
 						);
+						normals.push(faceNormal[0], faceNormal[1], faceNormal[2]);
 					}
 				}
+
 				for (let xi = 0; xi < tn; xi++) {
 					for (let yi = 0; yi < tn; yi++) {
 						const dy = yi * (tn + 1);
@@ -1019,23 +1046,23 @@ function loadModel(gl, rawModel, tn) {
 				// Save vertices used by this face.
 				for (const vertex of faceVertices) {
 					vertices.push(vertex[0], vertex[1], vertex[2]);
+
+					normals.push(faceNormal[0], faceNormal[1], faceNormal[2]);
 				}
 
-				if (pass.useTexture) {
-					// Save UVs used by this face.
-					const uvs = pass.uvs;
-				
+				// Save UVs used by this face.
+				const uvs = pass.uvs;
+
+				if (useTexture) {
 					for (const uv of faceUVs) {
 						uvs.push(uv[0], uv[1]);
 					}
 				} else {
-					// Save color for each vertex
-					const colors = pass.colors;
-					const rgbColor = PICO_COLORS[colorIndex];
-					const glColor = [rgbColor[0] / 255, rgbColor[1] / 255, rgbColor[2] / 255];
+					// Use secret UV indices
+					const u = 1/256 + colorIndex * (1/128);
 
-					for (let i = 0; i < faceIndices.length; i++) {
-						colors.push(glColor[0], glColor[1], glColor[2], 1);
+					for (let i = 0; i < faceUVs.length; i++) {
+						uvs.push(u, 1);
 					}
 				}
 
@@ -1054,13 +1081,13 @@ function loadModel(gl, rawModel, tn) {
 
 	// Init and return passes.
 	const passes = [
-		pPriorityCullTexture,
+		pPriorityCullLit,
 		pPriorityCull,
-		pPriorityTexture,
+		pPriorityLit,
 		pPriority,
-		pCullTexture,
+		pCullLit,
 		pCull,
-		pTexture,
+		pLit,
 		p,
 	];
 
@@ -1085,6 +1112,60 @@ function loadModel(gl, rawModel, tn) {
  */
 function lerp(a, b, t) {
 	return a + (b - a) * t;
+}
+
+/**
+ * @param {number[][]} vertices 
+ */
+function calculateFaceNormal(vertices) {
+	for (let i = 0; i < vertices.length; i++) {
+		const v0 = vertices[i];
+		const v1 = vertices[(i + 1) % vertices.length];
+		const v2 = vertices[(i + 2) % vertices.length];
+
+		const d0 = [
+			v0[0] - v1[0],
+			v0[1] - v1[1],
+			v0[2] - v1[2],
+		];
+		const d1 = [
+			v1[0] - v2[0],
+			v1[1] - v2[1],
+			v1[2] - v2[2],
+		];
+
+		const c = cross(d1, d0);
+		const len = length(c);
+		if (len > 0) {
+			return [
+				c[0] / len,
+				c[1] / len,
+				c[2] / len,
+			];
+		}
+	}
+
+	// All edges are parallel (a line)... Just return any vector :)
+	return [1, 0, 0];
+}
+
+/**
+ * @param {number[]} a 
+ * @param {number[]} b 
+ */
+ function cross(a, b) {
+	return [
+		a[1] * b[2] - a[2] * b[1],
+		a[2] * b[0] - a[0] * b[2],
+		a[0] * b[1] - a[1] * b[0],
+	];
+}
+
+/**
+ * @param {number[]} a 
+ */
+function length(a) {
+	return Math.hypot(a[0], a[1], a[2]);
 }
 
 class ShaderProgram {
@@ -1115,6 +1196,7 @@ class ShaderProgram {
 		}
 
 		this.vertexLocation = this.getAttribLocation("vertex");
+		this.uvLocation = this.getAttribLocation("uv");
 		this.mvpLocation = this.getUniformLocation("mvp");
 	}
 
@@ -1162,6 +1244,29 @@ class ShaderProgram {
 	}
 }
 
+// 32x4 image of pico8 colors, as array of indexes.
+// Each group of 2x4 pixels represents the gradient for a given color.
+// Top -> bottom = light -> dark.
+// The two columns are for dithering: there may be two different colors for a given light level.
+// (This is based directly off picoCAD's lighting).
+const DATA = "00112233445566778899aabbccddeeff0010213542516d768294a9b3cdd5e8fe000011552211dd6622449933dd55889900000011110055dd1122445555112244";
+
+const LIGHT_MAP_IMAGE = new ImageData(32, 4);
+
+// init data
+const data = LIGHT_MAP_IMAGE.data;
+
+let index = 0;
+for (let i = 0; i < 128; i++) {
+	const color = PICO_COLORS[parseInt(DATA.charAt(i), 16)];
+
+	data[index    ] = color[0];
+	data[index + 1] = color[1];
+	data[index + 2] = color[2];
+	data[index + 3] = 255;
+	index += 4;
+}
+
 class PicoCADViewer {
 	/**
 	 * @param {object} [options]
@@ -1180,7 +1285,7 @@ class PicoCADViewer {
 		}
 
 		/** The webGL rendering context. */
-		this.gl = this.canvas.getContext("webgl", {
+		const gl = this.gl = this.canvas.getContext("webgl", {
 			antialias: false,
 		});
 		
@@ -1217,24 +1322,83 @@ class PicoCADViewer {
 		/** Quads can be tessellated to reduce the effect of UV distortion. Pass 0 to do no tessellation. */
 		this.tesselationCount = options.tesselationCount ?? 3;
 
+		/** The lighting direction. Does not have to be normalized. */
+		this.lightDirection = {
+			x: 1,
+			y: 0.5,
+			z: 0,
+		};
+
 		/** @private @type {Pass[]} */
 		this._passes = [];
 		/** @private @type {WebGLTexture} */
 		this._mainTex = null;
+		/** @private @type {WebGLTexture} */
+		this._indexTex = null;
 		/** @private */
-		this._programColor = createColorProgram(this.gl);
+		this._lightMapTex = this._createTexture(null, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, LIGHT_MAP_IMAGE);
 		/** @private */
-		this._programTexture = createTextureProgram(this.gl);
+		this._programTexture = createTextureProgram(gl);
+		/** @private */
+		this._programUnlitTexture = createUnlitTextureProgram(gl);
 		/** @private @type {WirePass} */
 		this._wireframe = null;
 		/** @private */
-		this._programWireframe = createWireframeProgram(this.gl);
+		this._programWireframe = createWireframeProgram(gl);
 
 		// Init GL.
-		const gl = this.gl;
-
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(gl.LEQUAL);
+	}
+
+	/**
+	 * @private
+	 * @param {WebGLTexture} tex 
+	 * @param {number} internalFormat 
+	 * @param {number} format 
+	 * @param {number} type 
+	 * @param {TexImageSource|ArrayBufferView} source
+	 * @param {number} [width]
+	 * @param {number} [height]
+	 */
+	_createTexture(tex, internalFormat, format, type, source, width, height) {
+		const gl = this.gl;
+
+		if (tex == null) {
+			tex = gl.createTexture();
+		}
+
+		gl.bindTexture(gl.TEXTURE_2D, tex);
+
+		if (width == null) {
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				internalFormat,
+				format,
+				type,
+				/** @type {TexImageSource} */(source)
+			);
+		} else {
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				internalFormat,
+				width,
+				height,
+				0,
+				format,
+				type,
+				/** @type {ArrayBufferView} */(source)
+			);
+		}
+		
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+		return tex;
 	}
 
 	/**
@@ -1315,6 +1479,9 @@ class PicoCADViewer {
 
 			gl.deleteTexture(this._mainTex);
 			this._mainTex = null;
+
+			gl.deleteTexture(this._indexTex);
+			this._indexTex = null;
 		}
 
 		this.loaded = false;
@@ -1337,23 +1504,9 @@ class PicoCADViewer {
 		this._passes = model.passes;
 		this._wireframe = model.wireframe;
 
-		// Upload GL texture.
-		if (this._mainTex == null) {
-			this._mainTex = gl.createTexture();
-		}
-		gl.bindTexture(gl.TEXTURE_2D, this._mainTex);
-		gl.texImage2D(
-			gl.TEXTURE_2D,
-			0,
-			gl.RGBA,
-			gl.RGBA,
-			gl.UNSIGNED_BYTE,
-			model.texture
-		);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		// Upload GL textures.
+		this._mainTex = this._createTexture(this._mainTex, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, model.texture);
+		this._indexTex = this._createTexture(this._indexTex, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, new Uint8Array(model.textureIndices), 128, 128);
 
 		// Done :)
 		this.loaded = true;
@@ -1393,6 +1546,9 @@ class PicoCADViewer {
 		rotateZ$1(mat, mat, this.cameraRotation.z);
 		translate(mat, mat, [ this.cameraPosition.x, this.cameraPosition.y, this.cameraPosition.z ]);
 
+		// Setup lighting
+		const lightVector = normalized(this.lightDirection);
+
 		// Draw model
 		if (this.drawModel) {
 			// Render each pass
@@ -1405,7 +1561,7 @@ class PicoCADViewer {
 					continue;
 				}
 
-				const programInfo = pass.useTexture ? this._programTexture : this._programColor;
+				const programInfo = pass.lighting ? this._programTexture : this._programUnlitTexture;
 
 				programInfo.program.use();
 
@@ -1415,39 +1571,8 @@ class PicoCADViewer {
 					false,
 					mat,
 				);
-		
-				if (programInfo === this._programTexture) {
-					// Main texture
-					gl.activeTexture(gl.TEXTURE0);
-					gl.bindTexture(gl.TEXTURE_2D, this._mainTex);
-					gl.uniform1i(this._programTexture.locations.mainTex, 0);
 
-					// UV attrib
-					gl.bindBuffer(gl.ARRAY_BUFFER, pass.uvBuffer);
-					gl.vertexAttribPointer(
-						this._programTexture.locations.uv,
-						2,
-						gl.FLOAT,
-						false,
-						0,
-						0,
-					);
-					gl.enableVertexAttribArray(this._programTexture.locations.uv);
-				} else if (programInfo === this._programColor) {
-					// Color attrib
-					gl.bindBuffer(gl.ARRAY_BUFFER, pass.colorBuffer);
-					gl.vertexAttribPointer(
-						this._programColor.locations.color,
-						4,
-						gl.FLOAT,
-						false,
-						0,
-						0,
-					);
-					gl.enableVertexAttribArray(this._programColor.locations.color);
-				}
-
-				// Bind vertex data
+				// Vertex and UV attrib
 				gl.bindBuffer(gl.ARRAY_BUFFER, pass.vertexBuffer);
 				gl.vertexAttribPointer(
 					programInfo.program.vertexLocation,
@@ -1458,6 +1583,50 @@ class PicoCADViewer {
 					0,
 				);
 				gl.enableVertexAttribArray(programInfo.program.vertexLocation);
+
+				gl.bindBuffer(gl.ARRAY_BUFFER, pass.uvBuffer);
+				gl.vertexAttribPointer(
+					programInfo.program.uvLocation,
+					2,
+					gl.FLOAT,
+					false,
+					0,
+					0,
+				);
+				gl.enableVertexAttribArray(programInfo.program.uvLocation);
+
+				// Shader specific data
+				if (programInfo === this._programUnlitTexture) {
+					// Main texture
+					gl.activeTexture(gl.TEXTURE0);
+					gl.bindTexture(gl.TEXTURE_2D, this._mainTex);
+					gl.uniform1i(programInfo.locations.mainTex, 0);
+				} else if (programInfo === this._programTexture) {
+					// Index texture
+					gl.activeTexture(gl.TEXTURE0);
+					gl.bindTexture(gl.TEXTURE_2D, this._indexTex);
+					gl.uniform1i(programInfo.locations.indexTex, 0);
+
+					// Light-map texture
+					gl.activeTexture(gl.TEXTURE1);
+					gl.bindTexture(gl.TEXTURE_2D, this._lightMapTex);
+					gl.uniform1i(programInfo.locations.lightMap, 1);
+
+					// Light direction
+					gl.uniform3f(programInfo.locations.lightDir, lightVector.x, lightVector.y, lightVector.z);
+
+					// Normal attrib
+					gl.bindBuffer(gl.ARRAY_BUFFER, pass.normalBuffer);
+					gl.vertexAttribPointer(
+						programInfo.locations.normal,
+						3,
+						gl.FLOAT,
+						false,
+						0,
+						0,
+					);
+					gl.enableVertexAttribArray(programInfo.locations.normal);
+				}
 
 				// Configure culling
 				if (pass.cull) {
@@ -1473,11 +1642,10 @@ class PicoCADViewer {
 
 				// Clean up attributes
 				gl.disableVertexAttribArray(programInfo.program.vertexLocation);
-
+				gl.disableVertexAttribArray(programInfo.program.uvLocation);
+				
 				if (programInfo === this._programTexture) {
-					gl.disableVertexAttribArray(this._programTexture.locations.uv);
-				} else if (programInfo === this._programColor) {
-					gl.disableVertexAttribArray(this._programColor.locations.color);
+					gl.disableVertexAttribArray(programInfo.locations.normal);
 				}
 			}
 		}
@@ -1572,7 +1740,7 @@ class PicoCADViewer {
 		return this._transformDirection(0, -1, 0);
 	}
 	getCameraForward() {
-		return this._transformDirection(0, 0, 1);
+		return this._transformDirection(0, 0, -1);
 	}
 
 	/**
@@ -1622,20 +1790,20 @@ class PicoCADViewer {
 	}
 
 	/**
-	 * Set the camera rotation and position to look at the model a certain radius from the ceter.
+	 * Set the camera rotation and position to look at the model a certain radius from the center.
 	 * @param {number} radius 
-	 * @param {number} y The base y position
 	 * @param {number} spin The horizontal position (radians).
 	 * @param {number} roll The vertical position (radians).
+	 * @param {{x: number, y: number, z: number}} [center] Defaults to {x: 0, y: 1.5, z: 0}
 	 */
-	setTurntableCamera(radius, y, spin, roll) {
+	setTurntableCamera(radius, spin, roll, center={ x: 0, y: 1.5, z: 0}) {
 		const a = Math.PI - spin;
 		roll = -roll;
 
 		this.cameraPosition = {
-			x: radius * Math.cos(roll) * Math.sin(a),
-			y: radius * Math.sin(roll) - y,
-			z: radius * Math.cos(roll) * Math.cos(a),
+			x: radius * Math.cos(roll) * Math.sin(a) - center.x,
+			y: radius * Math.sin(roll) - center.y,
+			z: radius * Math.cos(roll) * Math.cos(a) - center.z,
 		};
 		this.cameraRotation = {
 			y: spin,
@@ -1657,12 +1825,15 @@ class PicoCADViewer {
 		}
 		this._passes = [];
 
+		gl.deleteTexture(this._lightMapTex);
 		gl.deleteTexture(this._mainTex);
+		gl.deleteTexture(this._indexTex);
+		this._lightMapTex = null;
+		this._mainTex = null;
+		this._indexTex = null;
 
-		this._programColor.program.free();
 		this._programTexture.program.free();
 		this._programWireframe.program.free();
-		this._programColor = null;
 		this._programTexture = null;
 		this._programWireframe = null;
 	}
@@ -1672,6 +1843,54 @@ class PicoCADViewer {
  * @param {WebGLRenderingContext} gl 
  */
  function createTextureProgram(gl) {
+	const program = new ShaderProgram(gl, `
+		attribute vec4 vertex;
+		attribute vec3 normal;
+		attribute vec2 uv;
+
+		varying highp vec2 v_uv;
+		varying highp vec3 v_normal;
+
+		uniform mat4 mvp;
+
+		void main() {
+			v_normal = normal;
+			v_uv = uv;
+			gl_Position = mvp * vertex;
+		}
+	`, `
+		varying highp vec2 v_uv;
+		varying highp vec3 v_normal;
+		
+		uniform sampler2D indexTex;
+		uniform sampler2D lightMap;
+		uniform highp vec3 lightDir;
+
+		void main() {
+			highp float index = texture2D(indexTex, v_uv).r;
+			if (index == 1.0) discard;
+			highp float intensity = clamp(4.0 * abs(dot(v_normal, lightDir)) - 1.0, 0.0, 1.0);
+			gl_FragColor = texture2D(lightMap, vec2(index * 15.9375 + mod(gl_FragCoord.x + gl_FragCoord.y, 2.0) * 0.03125, 1.0 - intensity));
+		}
+	`);
+	
+	return {
+		program: program,
+		locations: {
+			uv: program.getAttribLocation("uv"),
+			normal: program.getAttribLocation("normal"),
+			indexTex: program.getUniformLocation("indexTex"),
+			lightMap: program.getUniformLocation("lightMap"),
+			lightDir: program.getUniformLocation("lightDir"),
+		}
+	};
+}
+
+
+/**
+ * @param {WebGLRenderingContext} gl 
+ */
+ function createUnlitTextureProgram(gl) {
 	const program = new ShaderProgram(gl, `
 		attribute vec4 vertex;
 		attribute vec2 uv;
@@ -1690,49 +1909,16 @@ class PicoCADViewer {
 		uniform sampler2D mainTex;
 
 		void main() {
-			highp vec4 col = texture2D(mainTex, v_uv.xy);
-			if (col.a == float(0)) discard;
-			gl_FragColor = col;
+			lowp vec4 color = texture2D(mainTex, v_uv);
+			if (color.a == 0.0) discard;
+			gl_FragColor = color;
 		}
 	`);
 	
 	return {
 		program: program,
 		locations: {
-			uv: program.getAttribLocation("uv"),
 			mainTex: program.getUniformLocation("mainTex"),
-		}
-	};
-}
-
-/**
- * @param {WebGLRenderingContext} gl 
- */
-function createColorProgram(gl) {
-	const program = new ShaderProgram(gl, `
-		attribute vec4 vertex;
-		attribute vec4 col;
-
-		varying lowp vec4 fcol;
-
-		uniform mat4 mvp;
-
-		void main() {
-			fcol = col;
-			gl_Position = mvp * vertex;
-		}
-	`, `
-		varying lowp vec4 fcol;
-
-		void main() {
-			gl_FragColor = fcol;
-		}
-	`);
-	
-	return {
-		program: program,
-		locations: {
-			color: program.getAttribLocation("col"),
 		}
 	};
 }
@@ -1762,6 +1948,19 @@ function createColorProgram(gl) {
 		locations: {
 			color: program.getUniformLocation("color"),
 		}
+	};
+}
+
+/**
+ * @param {{x: number, y: number, z: number}} vec 
+ */
+function normalized(vec) {
+	let len = Math.hypot(vec.x, vec.y, vec.z);
+	if (len === 0) len = 1;
+	return {
+		x: vec.x / len,
+		y: vec.y / len,
+		z: vec.z / len,
 	};
 }
 

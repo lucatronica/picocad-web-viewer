@@ -1,4 +1,4 @@
-import PicoCADViewer from "./pico-cad-viewer.js";
+import PicoCADViewer from "../dist/pico-cad-viewer.js";
 
 // Get elements
 const texCanvas = /** @type {HTMLCanvasElement} */(document.getElementById("texture"));
@@ -21,7 +21,8 @@ let cameraSpin = -Math.PI / 2;
 let cameraRoll = 0.2;
 let cameraRadius = 12;
 let cameraTurntableSpeed = 0.75;
-let cameraTurntableY = 1.5;
+let cameraTurntableCenter = {x: 0, y: 1.5, z: 0};
+let cameraTurntableAuto = true;
 let cameraMode = 0;
 
 
@@ -32,7 +33,7 @@ const texCanvasCtx = texCanvas.getContext("2d");
 function loadedModel() {
 	cameraRadius = pcv.model.zoomLevel;
 	
-	viewportCanvas.classList.add("clickable");
+	viewportCanvas.classList.add("loaded");
 
 	texCanvasCtx.putImageData(pcv.model.texture, 0, 0);
 
@@ -67,6 +68,8 @@ window.onkeydown = event => {
 		// down handlers
 		if (key === "t") {
 			inputWireFrameHandler(!pcv.drawWireframe);
+		} else if (key === "r") {
+			cameraTurntableAuto = !cameraTurntableAuto;
 		}
 	}
 };
@@ -77,11 +80,15 @@ window.onkeyup = event => {
 	}
 };
 
-viewportCanvas.onclick = () => {
+viewportCanvas.ondblclick = () => {
 	if (pcv.loaded) {
 		viewportCanvas.requestPointerLock();
 	}
 };
+
+viewportCanvas.oncontextmenu = (event) => {
+	event.preventDefault();
+}
 
 document.onpointerlockchange = (event) => {
 	if (document.pointerLockElement === viewportCanvas) {
@@ -91,19 +98,73 @@ document.onpointerlockchange = (event) => {
 	}
 };
 
+let mouseDown = /** @type {boolean[]} */(Array(5)).fill(false);
+let mouseDownViewport = /** @type {boolean[]} */(Array(5)).fill(false);
+let mouse = [0, 0];
+
+window.onmousedown = (event) => {
+	const button = event.button;
+	const isViewport = event.target == viewportCanvas;
+
+	mouseDown[button] = true;
+	mouseDownViewport[button] = isViewport;
+
+	if (isViewport) {
+		event.preventDefault();
+
+		viewportCanvas.classList.add("grabbing");
+
+		if (cameraMode === 0) {
+			cameraTurntableAuto = false;
+		}
+	}
+};
+
+window.onmouseup = (event) => {
+	const button = event.button;
+
+	mouseDown[button] = false;
+	mouseDownViewport[button] = false;
+
+	viewportCanvas.classList.remove("grabbing");
+};
+
 window.onmousemove = (event) => {
-	if (document.pointerLockElement === viewportCanvas && cameraMode === 1) {
+	const mouseNow = [event.clientX, event.clientY];
+	const mouseDelta = [mouseNow[0] - mouse[0], mouseNow[1] - mouse[1]];
+
+	if (cameraMode === 1 && document.pointerLockElement === viewportCanvas) {
 		const sensitivity = 0.003;
 
 		cameraSpin += event.movementX * sensitivity;
 		cameraRoll += event.movementY * sensitivity;
+	} else if (cameraMode == 0) {
+		if (mouseDownViewport[0]) {
+			const sensitivity = 0.005;
+
+			cameraSpin += mouseDelta[0] * sensitivity;
+			cameraRoll += mouseDelta[1] * sensitivity;
+		} else if (mouseDownViewport[1] || mouseDownViewport[2]) {
+			const sensitivity = 0.005;
+
+			const up = pcv.getCameraUp();
+			const right = pcv.getCameraRight();
+			const rightDelta = mouseDelta[0] * sensitivity;
+			const upDelta = -mouseDelta[1] * sensitivity;
+
+			cameraTurntableCenter.x += right.x * rightDelta + up.x * upDelta;
+			cameraTurntableCenter.y += right.y * rightDelta + up.y * upDelta;
+			cameraTurntableCenter.z += right.z * rightDelta + up.z * upDelta;
+		}
 	}
+
+	mouse = mouseNow;
 };
 
 viewportCanvas.onwheel = (event) => {
 	event.preventDefault();
 
-	if (cameraMode === 1 || (cameraMode === 0 && event.shiftKey)) {
+	if (cameraMode === 1 || (cameraMode === 0 && event.altKey)) {
 		inputFOVUpdate(pcv.cameraFOV + event.deltaY);
 	} else if (cameraMode === 0) {
 		cameraRadius = clamp(0, 200, cameraRadius + event.deltaY * 0.2);
@@ -153,8 +214,8 @@ pcv.startDrawLoop((dt) => {
 	let inputUD = 0;
 	let inputCameraLR = 0;
 	let inputCameraUD = 0;
-	if (keys["w"]) inputFB -= 1;
-	if (keys["s"]) inputFB += 1;
+	if (keys["w"]) inputFB += 1;
+	if (keys["s"]) inputFB -= 1;
 	if (keys["a"]) inputLR -= 1;
 	if (keys["d"]) inputLR += 1;
 	if (keys["q"] || keys["shift"] || keys["control"]) inputUD -= 1;
@@ -166,14 +227,19 @@ pcv.startDrawLoop((dt) => {
 
 	if (cameraMode === 0) {
 		// turntable
-		cameraTurntableSpeed -= (inputLR + inputCameraLR) * 2 * dt;
-		cameraTurntableSpeed = clamp(-2, 2, cameraTurntableSpeed);
 		cameraRoll += (inputFB + inputCameraUD) * lookSpeed;
-		cameraTurntableY += inputUD * 3 * dt;
+		cameraTurntableCenter.y += inputUD * 3 * dt;
 
-		cameraSpin += cameraTurntableSpeed * dt;
+		if (cameraTurntableAuto) {
+			cameraTurntableSpeed -= (inputLR + inputCameraLR) * 2 * dt;
+			cameraTurntableSpeed = clamp(-2, 2, cameraTurntableSpeed);
 
-		pcv.setTurntableCamera(cameraRadius, cameraTurntableY, cameraSpin, cameraRoll);
+			cameraSpin += cameraTurntableSpeed * dt;
+		} else {
+			cameraSpin += (inputLR + inputCameraLR) * lookSpeed;
+		}
+
+		pcv.setTurntableCamera(cameraRadius, cameraSpin, cameraRoll, cameraTurntableCenter);
 	} else if (cameraMode === 1) {
 		// fps
 		cameraSpin += inputCameraLR * lookSpeed;
@@ -196,6 +262,17 @@ pcv.startDrawLoop((dt) => {
 			pos.z += (right.z * inputLR + forward.z * inputFB + up.z * inputUD) * speed;
 		}
 	}
+
+	// Set lighting direction
+	const du = 0.4;
+	const up = pcv.getCameraUp();
+	const forward = pcv.getCameraForward();
+
+	pcv.lightDirection = {
+		x: forward.x - up.x * du,
+		y: forward.y - up.y * du,
+		z: forward.z - up.z * du,
+	};
 });
 
 

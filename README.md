@@ -4,6 +4,4 @@
 
 ### TODO:
 
-* Shading, using picoCAD's per-face shading options
-* Option that attempts to fix Z-fighting
-* Object rotation property ("rot")
+* Attempts to fix Z-fighting on model load, or provide user directed method to resolve.

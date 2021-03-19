@@ -5,20 +5,20 @@
 export class Pass {
 	/**
 	 * @param {WebGLRenderingContext} gl
-	 * @param {{cull?: boolean, useTexture?: boolean, clearDepth?: boolean}} [options] 
+	 * @param {{cull?: boolean, lighting?: boolean, clearDepth?: boolean}} [options] 
 	 */
 	constructor(gl, options={}) {
 		this.gl = gl;
 		this.cull = options.cull ?? true;
-		this.useTexture = options.useTexture ?? true;
+		this.lighting = options.lighting ?? true;
 		this.clearDepth = options.clearDepth ?? false;
 
 		/** @type {number[]} */
 		this.vertices = [];
 		/** @type {number[]} */
-		this.uvs = [];
+		this.normals = [];
 		/** @type {number[]} */
-		this.colors = [];
+		this.uvs = [];
 		/** @type {number[]} */
 		this.triangles = [];
 	}
@@ -33,31 +33,30 @@ export class Pass {
 
 		if (!this.isEmpty()) {
 			this.vertexBuffer = gl.createBuffer();
+			this.uvBuffer = gl.createBuffer();
 			this.triangleBuffer = gl.createBuffer();
-
-			if (this.useTexture) {
-				this.uvBuffer = gl.createBuffer();
-			} else {
-				this.colorBuffer = gl.createBuffer();
+			
+			if (this.lighting) {
+				this.normalBuffer = gl.createBuffer();
 			}
 
 			gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
 			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.vertices), gl.STATIC_DRAW);
 
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.uvs), gl.STATIC_DRAW);
+
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.triangleBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.triangles), gl.STATIC_DRAW);
 			
-			if (this.useTexture) {
-				gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
-				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.uvs), gl.STATIC_DRAW);
-			} else {
-				gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
-				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.colors), gl.STATIC_DRAW);
+			if (this.lighting) {
+				gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
+				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.normals), gl.STATIC_DRAW);
 			}
 		}
 
 		this.uvs = null;
-		this.colors = null;
+		this.normals = null;
 		this.vertices = null;
 		this.triangles = null;
 	}
@@ -73,19 +72,17 @@ export class Pass {
 		const gl = this.gl;
 
 		gl.deleteBuffer(this.vertexBuffer);
+		gl.deleteBuffer(this.uvBuffer);
 		gl.deleteBuffer(this.triangleBuffer);
-
-		if (this.useTexture) {
-			gl.deleteBuffer(this.uvBuffer);
-		} else {
-			gl.deleteBuffer(this.colorBuffer);
+		
+		if (this.lighting) {
+			gl.deleteBuffer(this.normalBuffer);
 		}
 	}
 }
 
 export class WirePass {
 	/**
-	 * 
 	 * @param {WebGLRenderingContext} gl 
 	 */
 	constructor(gl) {

@@ -27,6 +27,7 @@ export class ShaderProgram {
 		}
 
 		this.vertexLocation = this.getAttribLocation("vertex");
+		this.uvLocation = this.getAttribLocation("uv");
 		this.mvpLocation = this.getUniformLocation("mvp");
 	}
 

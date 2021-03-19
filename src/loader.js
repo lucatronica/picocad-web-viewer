@@ -39,6 +39,7 @@ export function loadPicoCADModel(gl, source, tesselationCount) {
 		wireframe: wireframe,
 		texture: tex.data,
 		textureFlags: tex.flags,
+		textureIndices: tex.indices,
 		faceCount: faceCount,
 		objectCount: objectCount,
 	};
@@ -50,14 +51,14 @@ export function loadPicoCADModel(gl, source, tesselationCount) {
  * @param {number} tn Number of tessellations
  */
 function loadModel(gl, rawModel, tn) {
-	const pPriorityCullTexture = new Pass(gl, { cull: true, useTexture: true });
-	const pPriorityCull = new Pass(gl, { cull: true, useTexture: false });
-	const pPriorityTexture = new Pass(gl, { cull: false, useTexture: true });
-	const pPriority = new Pass(gl, { cull: false, useTexture: false });
-	const pCullTexture = new Pass(gl, { cull: true, useTexture: true, clearDepth: true });
-	const pCull = new Pass(gl, { cull: true, useTexture: false });
-	const pTexture = new Pass(gl, { cull: false, useTexture: true });
-	const p = new Pass(gl, { cull: false, useTexture: false });
+	const pPriorityCullLit = new Pass(gl, { cull: true, lighting: true });
+	const pPriorityCull = new Pass(gl, { cull: true, lighting: false });
+	const pPriorityLit = new Pass(gl, { cull: false, lighting: true });
+	const pPriority = new Pass(gl, { cull: false, lighting: false });
+	const pCullLit = new Pass(gl, { cull: true, lighting: true, clearDepth: true });
+	const pCull = new Pass(gl, { cull: true, lighting: false });
+	const pLit = new Pass(gl, { cull: false, lighting: true });
+	const p = new Pass(gl, { cull: false, lighting: false });
 
 	const wireframePass = new WirePass(gl);
 	const wireframeVertices = wireframePass.vertices;
@@ -66,7 +67,7 @@ function loadModel(gl, rawModel, tn) {
 
 	for (const object of rawModel.array) {
 		const pos = object.dict.pos.array;
-		const rot = object.dict.rot.array;
+		// const rot = object.dict.rot.array; // unused?
 
 		const rawVertices = object.dict.v.array.map(la => {
 			const xs = la.array;
@@ -96,28 +97,28 @@ function loadModel(gl, rawModel, tn) {
 			let pass;
 			if (priority) {
 				if (doubleSided) {
-					if (useTexture) {
-						pass = pPriorityTexture;
+					if (useShading) {
+						pass = pPriorityLit;
 					} else {
 						pass = pPriority;
 					}
 				} else {
-					if (useTexture) {
-						pass = pPriorityCullTexture
+					if (useShading) {
+						pass = pPriorityCullLit
 					} else {
 						pass = pPriorityCull;
 					}
 				}
 			} else {
 				if (doubleSided) {
-					if (useTexture) {
-						pass = pTexture;
+					if (useShading) {
+						pass = pLit;
 					} else {
 						pass = p;
 					}
 				} else {
-					if (useTexture) {
-						pass = pCullTexture
+					if (useShading) {
+						pass = pCullLit
 					} else {
 						pass = pCull;
 					}
@@ -126,6 +127,7 @@ function loadModel(gl, rawModel, tn) {
 
 			const vertices = pass.vertices;
 			const triangles = pass.triangles;
+			const normals = pass.normals;
 
 			// Get current vertex index.
 			const vertexIndex0 = Math.floor(vertices.length / 3);
@@ -152,7 +154,11 @@ function loadModel(gl, rawModel, tn) {
 				]);
 			}
 
-			if (faceIndices.length === 4 && pass.useTexture && tn > 1) {
+			// Calculate face normal (should be same for all triangles)
+			const faceNormal = calculateFaceNormal(faceVertices);
+
+			// Get triangles
+			if (faceIndices.length === 4 && useTexture && tn > 1) {
 				// Tesselate quad.
 				const uvs = pass.uvs;
 
@@ -196,10 +202,10 @@ function loadModel(gl, rawModel, tn) {
 							lerp(p0[3], p1[3], yt),
 							lerp(p0[4], p1[4], yt),
 						);
+						normals.push(faceNormal[0], faceNormal[1], faceNormal[2]);
 					}
 				}
 
-				let i = 0;
 				for (let xi = 0; xi < tn; xi++) {
 					for (let yi = 0; yi < tn; yi++) {
 						const dy = yi * (tn + 1);
@@ -223,23 +229,23 @@ function loadModel(gl, rawModel, tn) {
 				// Save vertices used by this face.
 				for (const vertex of faceVertices) {
 					vertices.push(vertex[0], vertex[1], vertex[2]);
+
+					normals.push(faceNormal[0], faceNormal[1], faceNormal[2]);
 				}
 
-				if (pass.useTexture) {
-					// Save UVs used by this face.
-					const uvs = pass.uvs;
-				
+				// Save UVs used by this face.
+				const uvs = pass.uvs;
+
+				if (useTexture) {
 					for (const uv of faceUVs) {
 						uvs.push(uv[0], uv[1]);
 					}
 				} else {
-					// Save color for each vertex
-					const colors = pass.colors;
-					const rgbColor = PICO_COLORS[colorIndex];
-					const glColor = [rgbColor[0] / 255, rgbColor[1] / 255, rgbColor[2] / 255];
+					// Use secret UV indices
+					const u = 1/256 + colorIndex * (1/128);
 
-					for (let i = 0; i < faceIndices.length; i++) {
-						colors.push(glColor[0], glColor[1], glColor[2], 1);
+					for (let i = 0; i < faceUVs.length; i++) {
+						uvs.push(u, 1);
 					}
 				}
 
@@ -258,13 +264,13 @@ function loadModel(gl, rawModel, tn) {
 
 	// Init and return passes.
 	const passes = [
-		pPriorityCullTexture,
+		pPriorityCullLit,
 		pPriorityCull,
-		pPriorityTexture,
+		pPriorityLit,
 		pPriority,
-		pCullTexture,
+		pCullLit,
 		pCull,
-		pTexture,
+		pLit,
 		p,
 	];
 
@@ -289,4 +295,58 @@ function loadModel(gl, rawModel, tn) {
  */
 function lerp(a, b, t) {
 	return a + (b - a) * t;
+}
+
+/**
+ * @param {number[][]} vertices 
+ */
+function calculateFaceNormal(vertices) {
+	for (let i = 0; i < vertices.length; i++) {
+		const v0 = vertices[i];
+		const v1 = vertices[(i + 1) % vertices.length];
+		const v2 = vertices[(i + 2) % vertices.length];
+
+		const d0 = [
+			v0[0] - v1[0],
+			v0[1] - v1[1],
+			v0[2] - v1[2],
+		];
+		const d1 = [
+			v1[0] - v2[0],
+			v1[1] - v2[1],
+			v1[2] - v2[2],
+		];
+
+		const c = cross(d1, d0);
+		const len = length(c);
+		if (len > 0) {
+			return [
+				c[0] / len,
+				c[1] / len,
+				c[2] / len,
+			];
+		}
+	}
+
+	// All edges are parallel (a line)... Just return any vector :)
+	return [1, 0, 0];
+}
+
+/**
+ * @param {number[]} a 
+ * @param {number[]} b 
+ */
+ function cross(a, b) {
+	return [
+		a[1] * b[2] - a[2] * b[1],
+		a[2] * b[0] - a[0] * b[2],
+		a[0] * b[1] - a[1] * b[0],
+	];
+}
+
+/**
+ * @param {number[]} a 
+ */
+function length(a) {
+	return Math.hypot(a[0], a[1], a[2]);
 }
