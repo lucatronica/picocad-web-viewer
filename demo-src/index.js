@@ -83,9 +83,9 @@ window.onkeydown = event => {
 		keys[key] = true;
 
 		// down handlers
-		if (key === "t") {
+		if (key === "r") {
 			inputWireFrameHandler(!pcv.drawWireframe);
-		} else if (key === "r") {
+		} else if (key === "t") {
 			inputAutoTurnHandler(!cameraTurntableAuto)
 		}
 	}
