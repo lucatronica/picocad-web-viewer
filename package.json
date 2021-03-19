@@ -6,8 +6,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "rollup src/index.js --file dist/pico-cad-viewer.js --format esm",
-    "watch": "rollup src/index.js --file dist/pico-cad-viewer.js --format esm --watch"
+    "build": "rollup -c",
+    "build-demo": "rollup --config rollup.config-demo.js",
+    "watch-demo": "rollup --config rollup.config-demo.js --watch"
   },
   "repository": {
     "type": "git",
@@ -28,6 +29,7 @@
     "gl-matrix": "^3.3.0"
   },
   "devDependencies": {
-    "rollup": "^2.41.2"
+    "rollup": "^2.41.2",
+    "rollup-plugin-terser": "^7.0.2"
   }
 }

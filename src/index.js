@@ -6,7 +6,7 @@ import { PICO_COLORS } from "./pico";
 import { ShaderProgram } from "./shader-program";
 import { LIGHT_MAP_IMAGE } from "./lighting";
 
-export class PicoCADViewer {
+export default class PicoCADViewer {
 	/**
 	 * @param {object} [options]
 	 * @param {HTMLCanvasElement} [options.canvas] The canvas to render to. If not provided one will be created.
@@ -149,10 +149,8 @@ export class PicoCADViewer {
 		if (typeof model === "string") {
 			if (model.startsWith("picocad;")) {
 				this._loadString(model);
-			} else if (model.startsWith("http:") || model.startsWith("https:")) {
-				await this._loadUrl(model);
 			} else {
-				throw Error(`Invalid string/url: ${model.slice(0, 50)}`);
+				await this._loadUrl(model);
 			}
 		} else if (model instanceof URL) {
 			await this._loadUrl(model);
@@ -577,7 +575,6 @@ export class PicoCADViewer {
 		this._programWireframe = null;
 	}
 }
-export default PicoCADViewer;
 
 /**
  * @param {WebGLRenderingContext} gl 

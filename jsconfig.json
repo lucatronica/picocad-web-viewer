@@ -3,4 +3,5 @@
 		"checkJs": true,
 		"target": "es2019",
 	},
+	"include": ["src/**/*", "demo-src/**/*"]
 }
