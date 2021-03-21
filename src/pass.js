@@ -5,12 +5,13 @@
 export class Pass {
 	/**
 	 * @param {WebGLRenderingContext} gl
-	 * @param {{cull?: boolean, lighting?: boolean, clearDepth?: boolean}} [options] 
+	 * @param {{cull?: boolean, shading?: boolean, texture?: boolean, clearDepth?: boolean}} [options] 
 	 */
 	constructor(gl, options={}) {
 		this.gl = gl;
 		this.cull = options.cull ?? true;
-		this.lighting = options.lighting ?? true;
+		this.shading = options.shading ?? true;
+		this.texture = options.texture ?? true;
 		this.clearDepth = options.clearDepth ?? false;
 
 		/** @type {number[]} */
@@ -19,6 +20,8 @@ export class Pass {
 		this.normals = [];
 		/** @type {number[]} */
 		this.uvs = [];
+		/** @type {number[]} */
+		this.colorUVs = [];
 		/** @type {number[]} */
 		this.triangles = [];
 	}
@@ -34,9 +37,10 @@ export class Pass {
 		if (!this.isEmpty()) {
 			this.vertexBuffer = gl.createBuffer();
 			this.uvBuffer = gl.createBuffer();
+			this.colorUVBuffer = gl.createBuffer();
 			this.triangleBuffer = gl.createBuffer();
 			
-			if (this.lighting) {
+			if (this.shading) {
 				this.normalBuffer = gl.createBuffer();
 			}
 
@@ -45,17 +49,21 @@ export class Pass {
 
 			gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
 			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.uvs), gl.STATIC_DRAW);
+		
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.colorUVBuffer);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.colorUVs), gl.STATIC_DRAW);
 
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.triangleBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.triangles), gl.STATIC_DRAW);
 			
-			if (this.lighting) {
+			if (this.shading) {
 				gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
 				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.normals), gl.STATIC_DRAW);
 			}
 		}
 
 		this.uvs = null;
+		this.colorUVs = null;
 		this.normals = null;
 		this.vertices = null;
 		this.triangles = null;
@@ -73,9 +81,10 @@ export class Pass {
 
 		gl.deleteBuffer(this.vertexBuffer);
 		gl.deleteBuffer(this.uvBuffer);
+		gl.deleteBuffer(this.colorUVBuffer);
 		gl.deleteBuffer(this.triangleBuffer);
 		
-		if (this.lighting) {
+		if (this.shading) {
 			gl.deleteBuffer(this.normalBuffer);
 		}
 	}

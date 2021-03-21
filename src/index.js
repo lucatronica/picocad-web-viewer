@@ -11,12 +11,12 @@ export default class PicoCADViewer {
 	 * @param {object} [options]
 	 * @param {HTMLCanvasElement} [options.canvas] The canvas to render to. If not provided one will be created.
 	 * @param {number} [options.fov] The camera FOV (degrees). Defaults to 90;
-	 * @param {boolean} [options.drawModel] If the model should be drawn. Defaults to true.
 	 * @param {boolean} [options.drawWireframe] If the wireframe should be drawn. Defaults to false.
 	 * @param {number[]} [options.wireframeColor] The wireframe color as [R, G, B] (each component [0, 1]). Defaults to white.
 	 * @param {number[]} [options.wireframeXray] If the wireframe should be drawn "through" the model. Defaults to true.
 	 * @param {number} [options.tesselationCount] Quads can be tessellated to reduce the effect of UV distortion. Pass 1 or less to do no tessellation. Defaults to 3.
-	 * @param {boolean} [options.unlit] If all faces should be draw without lighting. Defaults to false.
+	 * @param {boolean} [options.shading] If all faces should be draw without lighting. Defaults to true.
+	 * @param {PicoCADRenderMode} [options.renderMode] The style draw the model. Defaults to "texture".
 	 * @param {{x: number, y: number, z: number}} [options.lightDirection] Defaults to {x: 1, y: -1, z: 0}.
 	 */
 	constructor(options={}) {
@@ -52,10 +52,10 @@ export default class PicoCADViewer {
 		/** Information about the current model. @readonly @type {{name: string, backgroundIndex: number, zoomLevel: number, backgroundColor: number[], alphaIndex: number, alphaColor: number[], texture: ImageData, textureColorFlags: boolean[]}} */
 		this.model = null;
 
-		/** If the model should be drawn. */
-		this.drawModel = options.drawModel ?? true;
-		/** If all faces should be drawn without lighting. */
-		this.unlit = options.unlit ?? false;
+		/** If the model should be drawn with lighting. */
+		this.shading = options.shading ?? true;
+		/** The style draw the model. */
+		this.renderMode = options.renderMode ?? "texture";
 		/** If the wireframe should be drawn. */
 		this.drawWireframe = options.drawWireframe ?? false;
 		/** If the wireframe should be drawn "through" the model. */
@@ -252,7 +252,10 @@ export default class PicoCADViewer {
 	 * Draw the scene once.
 	 */
 	draw() {
-		if (!this.loaded || (!this.drawModel && !this.drawWireframe)) {
+		const doDrawModel = this.renderMode !== "none";
+		const forceColor = this.renderMode === "color";
+
+		if (!this.loaded || (!doDrawModel && !this.drawWireframe)) {
 			return;
 		}
 
@@ -286,7 +289,7 @@ export default class PicoCADViewer {
 		const lightVector = normalized(this.lightDirection);
 
 		// Draw model
-		if (this.drawModel) {
+		if (doDrawModel) {
 			// Render each pass
 			for (const pass of this._passes) {
 				if (pass.clearDepth) {
@@ -297,7 +300,7 @@ export default class PicoCADViewer {
 					continue;
 				}
 
-				const programInfo = (!this.unlit && pass.lighting) ? this._programTexture : this._programUnlitTexture;
+				const programInfo = (this.shading && pass.shading) ? this._programTexture : this._programUnlitTexture;
 
 				programInfo.program.use();
 
@@ -320,7 +323,7 @@ export default class PicoCADViewer {
 				);
 				gl.enableVertexAttribArray(programInfo.program.vertexLocation);
 
-				gl.bindBuffer(gl.ARRAY_BUFFER, pass.uvBuffer);
+				gl.bindBuffer(gl.ARRAY_BUFFER, (forceColor || !pass.texture) ? pass.colorUVBuffer : pass.uvBuffer);
 				gl.vertexAttribPointer(
 					programInfo.program.uvLocation,
 					2,
@@ -388,7 +391,7 @@ export default class PicoCADViewer {
 
 		// Draw wireframe
 		if (this.drawWireframe) {
-			if (this.drawModel && this.wireframeXray) {
+			if (doDrawModel && this.wireframeXray) {
 				gl.clear(gl.DEPTH_BUFFER_BIT);
 			}
 
@@ -498,6 +501,15 @@ export default class PicoCADViewer {
 		for (const pass of this._passes) {
 			count += Math.floor(pass.vertexCount / 3);
 		}
+		return count;
+	}
+
+	getDrawCallCount() {
+		let count = 0;
+		for (const pass of this._passes) {
+			if (!pass.isEmpty()) count++;
+		}
+		if (this.drawWireframe) count++;
 		return count;
 	}
 
@@ -699,3 +711,5 @@ function normalized(vec) {
 		z: vec.z / len,
 	};
 }
+
+/** @typedef {"texture" | "color" | "none"} PicoCADRenderMode */

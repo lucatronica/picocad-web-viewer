@@ -51,14 +51,21 @@ export function loadPicoCADModel(gl, source, tesselationCount) {
  * @param {number} tn Number of tessellations
  */
 function loadModel(gl, rawModel, tn) {
-	const pPriorityCullLit = new Pass(gl, { cull: true, lighting: true });
-	const pPriorityCull = new Pass(gl, { cull: true, lighting: false });
-	const pPriorityLit = new Pass(gl, { cull: false, lighting: true });
-	const pPriority = new Pass(gl, { cull: false, lighting: false });
-	const pCullLit = new Pass(gl, { cull: true, lighting: true, clearDepth: true });
-	const pCull = new Pass(gl, { cull: true, lighting: false });
-	const pLit = new Pass(gl, { cull: false, lighting: true });
-	const p = new Pass(gl, { cull: false, lighting: false });
+	const passes = [];
+
+	for (let i = 0; i < 16; i++) {
+		const cull        = i % 2  < 1;
+		const shading    = i % 4  < 2;
+		const texture     = i % 8  < 4;
+		// const priority = i      < 8;
+		
+		passes.push(new Pass(gl, {
+			cull: cull,
+			shading: shading,
+			texture: texture,
+			clearDepth: i === 8,
+		}));
+	}
 
 	const wireframePass = new WirePass(gl);
 	const wireframeVertices = wireframePass.vertices;
@@ -87,47 +94,29 @@ function loadModel(gl, rawModel, tn) {
 			const dict = face.dict;
 
 			const colorIndex = dict.c;
-			const doubleSided = dict.dbl === 1;
+			const cull = dict.dbl !== 1;
 			const useShading = dict.noshade !== 1;
 			const useTexture = dict.notex !== 1;
 			const priority = dict.prio === 1;
 			const rawUVs = dict.uv.array;
 
 			// Configure pass based on face props
-			let pass;
-			if (priority) {
-				if (doubleSided) {
-					if (useShading) {
-						pass = pPriorityLit;
-					} else {
-						pass = pPriority;
-					}
-				} else {
-					if (useShading) {
-						pass = pPriorityCullLit
-					} else {
-						pass = pPriorityCull;
-					}
-				}
-			} else {
-				if (doubleSided) {
-					if (useShading) {
-						pass = pLit;
-					} else {
-						pass = p;
-					}
-				} else {
-					if (useShading) {
-						pass = pCullLit
-					} else {
-						pass = pCull;
-					}
-				}
-			}
+			const pass = passes[
+				(cull       ? 0 : 1) +
+				(useShading ? 0 : 2) +
+				(useTexture ? 0 : 4) +
+				(priority   ? 0 : 8)
+			];
 
 			const vertices = pass.vertices;
 			const triangles = pass.triangles;
 			const normals = pass.normals;
+			const uvs = pass.uvs;
+			const colorUVs = pass.colorUVs;
+
+			// Color UVs
+			const colorU = 1/256 + colorIndex * (1/128);
+			const colorV = 1;
 
 			// Get current vertex index.
 			const vertexIndex0 = Math.floor(vertices.length / 3);
@@ -160,8 +149,6 @@ function loadModel(gl, rawModel, tn) {
 			// Get triangles
 			if (faceIndices.length === 4 && useTexture && tn > 1) {
 				// Tesselate quad.
-				const uvs = pass.uvs;
-
 				const c0 = faceVertices[0];
 				const c1 = faceVertices[1];
 				const c2 = faceVertices[2];
@@ -202,6 +189,7 @@ function loadModel(gl, rawModel, tn) {
 							lerp(p0[3], p1[3], yt),
 							lerp(p0[4], p1[4], yt),
 						);
+						colorUVs.push(colorU, colorV);
 						normals.push(faceNormal[0], faceNormal[1], faceNormal[2]);
 					}
 				}
@@ -234,18 +222,19 @@ function loadModel(gl, rawModel, tn) {
 				}
 
 				// Save UVs used by this face.
-				const uvs = pass.uvs;
+				// We always save both texture and color info, since models can be rendered in color mode.
 
-				if (useTexture) {
-					for (const uv of faceUVs) {
+				for (let i = 0; i < faceUVs.length; i++) {
+					// Save color.
+					colorUVs.push(colorU, colorV);
+
+					// Save texture UVs.
+					if (useTexture) {
+						const uv = faceUVs[i];
 						uvs.push(uv[0], uv[1]);
-					}
-				} else {
-					// Use secret UV indices
-					const u = 1/256 + colorIndex * (1/128);
-
-					for (let i = 0; i < faceUVs.length; i++) {
-						uvs.push(u, 1);
+					} else {
+						// Re-use color UV.
+						uvs.push(colorU, colorV);
 					}
 				}
 
@@ -263,17 +252,6 @@ function loadModel(gl, rawModel, tn) {
 	}
 
 	// Init and return passes.
-	const passes = [
-		pPriorityCullLit,
-		pPriorityCull,
-		pPriorityLit,
-		pPriority,
-		pCullLit,
-		pCull,
-		pLit,
-		p,
-	];
-
 	for (const pass of passes) {
 		pass.save();
 	}

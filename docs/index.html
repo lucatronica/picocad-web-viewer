@@ -183,22 +183,26 @@
 				</div>
 				<div>
 					<label>
+						Render mode
+						<select id="input-render-mode">
+							<option value="texture" selected>Texture</option>
+							<option value="color">Color</option>
+							<option value="none">None</option>
+						</select>
+					</label>
+					<label>
+						Shading
+						<input id="input-shading" type="checkbox" checked>
+					</label>
+				</div>
+				<div>
+					<label>
 						Wireframe
 						<input id="input-wireframe" type="checkbox">
 					</label>
 					<label>
 						Color
 						<input id="input-wireframe-color" type="color" value="#ffffff">
-					</label>
-				</div>
-				<div>
-					<label>
-						Render style
-						<select id="input-style">
-							<option value="lit" selected>Lit</option>
-							<option value="unlit">Unlit</option>
-							<option value="">None</option>
-						</select>
 					</label>
 				</div>
 				<div>
@@ -234,6 +238,8 @@
 			<ul>
 				<li><kbd>T</kbd> to toggle turntable mode</li>
 				<li><kbd>R</kbd> to toggle wireframe</li>
+				<li><kbd>L</kbd> to toggle shading</li>
+				<li><kbd>M</kbd> to toggle render mode</li>
 			</ul>
 		</div>
 	</div>

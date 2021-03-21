@@ -7,7 +7,8 @@ const inputResolution = /** @type {HTMLSelectElement} */(document.getElementById
 const inputAutoTurn = /** @type {HTMLInputElement} */(document.getElementById("input-auto-turn"));
 const inputWireframe = /** @type {HTMLInputElement} */(document.getElementById("input-wireframe"));
 const inputWireframeColor = /** @type {HTMLInputElement} */(document.getElementById("input-wireframe-color"));
-const inputStyle = /** @type {HTMLSelectElement} */(document.getElementById("input-style"));
+const inputRenderMode = /** @type {HTMLSelectElement} */(document.getElementById("input-render-mode"));
+const inputShading = /** @type {HTMLInputElement} */(document.getElementById("input-shading"));
 const inputFOV = /** @type {HTMLInputElement} */(document.getElementById("input-fov"));
 const btnShowControls = /** @type {HTMLButtonElement} */(document.getElementById("btn-show-controls"));
 const popupControls = document.getElementById("popup-controls")
@@ -50,7 +51,7 @@ function loadedModel() {
 		"Faces": pcv.model.faceCount,
 	};
 
-	console.log(`${pcv.getTriangleCount()} triangles`);
+	console.log(`${pcv.getTriangleCount()} triangles, ${pcv.getDrawCallCount()} draw calls`);
 
 	for (const [key, value] of Object.entries(stats)) {
 		statsTable.append(h("li", {}, `${key}: ${value}`));
@@ -87,6 +88,10 @@ window.onkeydown = event => {
 			inputWireFrameHandler(!pcv.drawWireframe);
 		} else if (key === "t") {
 			inputAutoTurnHandler(!cameraTurntableAuto)
+		} else if (key === "m") {
+			inputRenderModeHandler(inputRenderMode.value === "texture" ? "color" : "texture");
+		} else if (key === "l") {
+			inputShadingHandler(!inputShading.checked);
 		}
 	}
 };
@@ -219,16 +224,12 @@ inputHandler(inputWireframeColor, (value) => {
 	].map(s => parseInt(s, 16) / 255);
 });
 
-inputHandler(inputStyle, value => {
-	if (value === "lit") {
-		pcv.drawModel = true;
-		pcv.unlit = false;
-	} else if (value === "unlit") {
-		pcv.drawModel = true;
-		pcv.unlit = true;
-	} else if (value === "") {
-		pcv.drawModel = false;
-	}
+const inputRenderModeHandler = inputHandler(inputRenderMode, value => {
+	pcv.renderMode = /** @type {import("../src/index").PicoCADRenderMode} */(value);
+});
+
+const inputShadingHandler = inputHandler(inputShading, () => {
+	pcv.shading = inputShading.checked;
 });
 
 // Render loop
