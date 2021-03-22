@@ -4,7 +4,7 @@ import { loadPicoCADModel } from "./loader";
 import { Pass, WirePass } from "./pass";
 import { PICO_COLORS } from "./pico";
 import { ShaderProgram } from "./shader-program";
-import { LIGHT_MAP_IMAGE } from "./lighting";
+import { createColorLightMap, createTextureLightMap } from "./lighting";
 
 export default class PicoCADViewer {
 	/**
@@ -74,7 +74,9 @@ export default class PicoCADViewer {
 		/** @private @type {WebGLTexture} */
 		this._indexTex = null;
 		/** @private */
-		this._lightMapTex = this._createTexture(null, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, LIGHT_MAP_IMAGE);
+		this._lightMapTex = this._createTexture(null, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, createTextureLightMap());
+		/** @private */
+		this._colorLightMapTex = this._createTexture(null, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, createColorLightMap());
 		/** @private */
 		this._programTexture = createTextureProgram(gl);
 		/** @private */
@@ -300,6 +302,7 @@ export default class PicoCADViewer {
 					continue;
 				}
 
+				const useColor = forceColor || !pass.texture;
 				const programInfo = (this.shading && pass.shading) ? this._programTexture : this._programUnlitTexture;
 
 				programInfo.program.use();
@@ -323,7 +326,7 @@ export default class PicoCADViewer {
 				);
 				gl.enableVertexAttribArray(programInfo.program.vertexLocation);
 
-				gl.bindBuffer(gl.ARRAY_BUFFER, (forceColor || !pass.texture) ? pass.colorUVBuffer : pass.uvBuffer);
+				gl.bindBuffer(gl.ARRAY_BUFFER, useColor ? pass.colorUVBuffer : pass.uvBuffer);
 				gl.vertexAttribPointer(
 					programInfo.program.uvLocation,
 					2,
@@ -348,8 +351,12 @@ export default class PicoCADViewer {
 
 					// Light-map texture
 					gl.activeTexture(gl.TEXTURE1);
-					gl.bindTexture(gl.TEXTURE_2D, this._lightMapTex);
+					gl.bindTexture(gl.TEXTURE_2D, useColor ? this._colorLightMapTex : this._lightMapTex);
 					gl.uniform1i(programInfo.locations.lightMap, 1);
+
+					// Light map curve
+					gl.uniform1f(programInfo.locations.lightMapOffset, useColor ? -0.316326530612245 : -0.3571428571428572);
+					gl.uniform1f(programInfo.locations.lightMapGradient, useColor ? 1.63265306122449 : 2.857142857142857);
 
 					// Light direction
 					gl.uniform3f(programInfo.locations.lightDir, lightVector.x, lightVector.y, lightVector.z);
@@ -483,6 +490,21 @@ export default class PicoCADViewer {
 	}
 
 	/**
+	 * Set the light direction from the camera, matching native picoCAD's shading.
+	 */
+	setLightDirectionFromCamera() {
+		const du = 0.4;
+		const up = this.getCameraUp();
+		const forward = this.getCameraForward();
+
+		this.lightDirection = {
+			x: forward.x - up.x * du,
+			y: forward.y - up.y * du,
+			z: forward.z - up.z * du,
+		};
+	}
+
+	/**
 	 * The number of colors used in the texture.
 	 * (There may more used by face colors.)
 	 */
@@ -574,9 +596,11 @@ export default class PicoCADViewer {
 		this._passes = [];
 
 		gl.deleteTexture(this._lightMapTex);
+		gl.deleteTexture(this._colorLightMapTex);
 		gl.deleteTexture(this._mainTex);
 		gl.deleteTexture(this._indexTex);
 		this._lightMapTex = null;
+		this._colorLightMapTex = null;
 		this._mainTex = null;
 		this._indexTex = null;
 
@@ -613,11 +637,14 @@ export default class PicoCADViewer {
 		uniform sampler2D indexTex;
 		uniform sampler2D lightMap;
 		uniform highp vec3 lightDir;
+		uniform highp float lightMapOffset;
+		uniform highp float lightMapGradient;
 
 		void main() {
 			highp float index = texture2D(indexTex, v_uv).r;
 			if (index == 1.0) discard;
-			highp float intensity = clamp(4.0 * abs(dot(v_normal, lightDir)) - 1.0, 0.0, 1.0);
+			// highp float intensity = clamp(4.0 * abs(dot(v_normal, lightDir)) - 1.0, 0.0, 1.0);
+			highp float intensity = clamp(lightMapGradient * abs(dot(v_normal, lightDir)) + lightMapOffset, 0.0, 1.0);
 			gl_FragColor = texture2D(lightMap, vec2(index * 15.9375 + mod(gl_FragCoord.x + gl_FragCoord.y, 2.0) * 0.03125, 1.0 - intensity));
 		}
 	`);
@@ -630,6 +657,8 @@ export default class PicoCADViewer {
 			indexTex: program.getUniformLocation("indexTex"),
 			lightMap: program.getUniformLocation("lightMap"),
 			lightDir: program.getUniformLocation("lightDir"),
+			lightMapOffset: program.getUniformLocation("lightMapOffset"),
+			lightMapGradient: program.getUniformLocation("lightMapGradient"),
 		}
 	};
 }

@@ -291,16 +291,7 @@ pcv.startDrawLoop((dt) => {
 		}
 	}
 
-	// Set lighting direction
-	const du = 0.4;
-	const up = pcv.getCameraUp();
-	const forward = pcv.getCameraForward();
-
-	pcv.lightDirection = {
-		x: forward.x - up.x * du,
-		y: forward.y - up.y * du,
-		z: forward.z - up.z * du,
-	};
+	pcv.setLightDirectionFromCamera();
 });
 
 
@@ -402,3 +393,10 @@ function inputHandler(input, onchange) {
 		};
 	}
 }
+
+window["ramp"] = function (c, w) {
+	return {
+		offset: 0.5 - c/w,
+		gradient: 1/w,
+	};
+};

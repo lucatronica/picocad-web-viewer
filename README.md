@@ -32,5 +32,4 @@ if (oneShot) {
 
 ## TODO:
 
-* picoCAD has different shading on colors versus textures.
 * Attempts to fix Z-fighting on model load, or provide user directed method to resolve.
