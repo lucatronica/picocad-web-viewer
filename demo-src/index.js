@@ -72,8 +72,29 @@ btnShowControls.onclick = () => {
 	popupControls.hidden = !popupControls.hidden;
 };
 
+popupControls.querySelectorAll("kbd").forEach(kbd => {
+	kbd.onclick = () => keyPressed(kbd.textContent.toLowerCase());
+});
+
 
 // Input
+
+/**
+ * @param {string} key 
+ */
+function keyPressed(key) {
+	if (key === "r") {
+		inputWireFrameHandler(!pcv.drawWireframe);
+	} else if (key === "t") {
+		inputAutoTurnHandler(!cameraTurntableAuto)
+	} else if (key === "m") {
+		inputRenderModeHandler(inputRenderMode.value === "texture" ? "color" : "texture");
+	} else if (key === "l") {
+		inputShadingHandler(!inputShading.checked);
+	} else if (key === "/" || key === "?") {
+		pcv.load("./example.txt").then(loadedModel);
+	}
+}
 
 const keys = Object.create(null);
 
@@ -83,16 +104,7 @@ window.onkeydown = event => {
 		const key = event.key.toLowerCase();
 		keys[key] = true;
 
-		// down handlers
-		if (key === "r") {
-			inputWireFrameHandler(!pcv.drawWireframe);
-		} else if (key === "t") {
-			inputAutoTurnHandler(!cameraTurntableAuto)
-		} else if (key === "m") {
-			inputRenderModeHandler(inputRenderMode.value === "texture" ? "color" : "texture");
-		} else if (key === "l") {
-			inputShadingHandler(!inputShading.checked);
-		}
+		keyPressed(key);
 	}
 };
 window.onkeyup = event => {
