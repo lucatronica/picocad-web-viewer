@@ -55,6 +55,7 @@
 		#viewport {
 			margin: 0 auto 10px;
 			background: #000;
+			max-width: 100%;
 		}
 		#viewport.loaded {
 			cursor: grab;
@@ -68,19 +69,16 @@
 		}
 
 		#info, footer {
-			max-width: 700px;
 			margin: 0 auto 12px;
 		}
 
-		#info {
-			display: flex;
-		}
 		#info-details {
 			width: 100%;
 		}
 
 		#texture {
 			width: 256px;
+			width: 240px;
 			margin-right: 10px;
 			background: #000;
 			flex-shrink: 0;
@@ -136,14 +134,32 @@
 			position: fixed;
 			left: 0;
 			top: 0;
-			background: rgba(0,0,0,0.5);
+			background: rgba(0, 0, 0, 0.8);
 			width: 100%;
 			height: 100%;
 			padding: 20px 10px;
 		}
 		.popup > * {
-			max-width: 800px;
+			max-width: 700px;
 			margin: auto;
+		}
+
+		@media (max-width: 699px) {
+			#info-details {
+				margin-bottom: 8px;
+			}
+		}
+
+		@media (min-width: 700px) {
+			#info, footer {
+				max-width: 580px;
+			}
+			#info {
+				display: flex;
+			}
+			#info-details {
+				order: 1;
+			}
 		}
 	</style>
 	<title>picoCAD Viewer</title>
@@ -151,7 +167,6 @@
 <body>
 	<canvas id="viewport" width="128" height="128" aria-label="picoCAD viewport"></canvas>
 	<div id="info">
-		<canvas id="texture" width="128" height="120" aria-label="picoCAD current model texture"></canvas>
 		<div id="info-details">
 			<div id="controls">
 				<div>
@@ -215,6 +230,7 @@
 			</div>
 			<ul id="stats"></ul>
 		</div>
+		<canvas id="texture" width="128" height="120" aria-label="picoCAD current model texture"></canvas>
 	</div>
 	<footer>
 		<ul>

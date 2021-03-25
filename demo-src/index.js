@@ -30,6 +30,13 @@ let cameraTurntableAuto = true;
 let cameraMode = 0;
 
 
+// Example model.
+
+function loadExample() {
+	pcv.load("./example.txt").then(loadedModel);
+}
+
+
 // Extra model loading steps + stats
 
 const texCanvasCtx = texCanvas.getContext("2d");
@@ -92,7 +99,7 @@ function keyPressed(key) {
 	} else if (key === "l") {
 		inputShadingHandler(!inputShading.checked);
 	} else if (key === "/" || key === "?") {
-		pcv.load("./example.txt").then(loadedModel);
+		loadExample();
 	}
 }
 
@@ -131,6 +138,9 @@ document.onpointerlockchange = (event) => {
 		cameraMode = 0;
 	}
 };
+
+
+// Viewport mouse controls.
 
 let mouseDown = /** @type {boolean[]} */(Array(5)).fill(false);
 let mouseDownViewport = /** @type {boolean[]} */(Array(5)).fill(false);
@@ -207,11 +217,63 @@ viewportCanvas.onwheel = (event) => {
 	}
 };
 
+
+// Viewport touch controls.
+
+let currTouch = [0, 0, -1];
+let touchViewport = false;
+
+document.addEventListener("touchstart", (event) => {
+	touchViewport = event.target == viewportCanvas;
+
+	const touch = event.changedTouches[0];
+
+	currTouch = [touch.clientX, touch.clientY, touch.identifier];
+
+	if (touchViewport) {
+		event.preventDefault();
+
+		inputAutoTurnHandler(false);
+	}
+}, { passive: false });
+
+document.addEventListener("touchmove", (event) => {
+	const touch = Array.from(event.changedTouches).find(touch => touch.identifier === currTouch[2]);
+
+	if (touch != null) {
+		const newTouch = [touch.clientX, touch.clientY, touch.identifier]
+
+		if (touchViewport) {
+			const delta = [newTouch[0] - currTouch[0], newTouch[1] - currTouch[1]];
+			const sensitivity = 0.01;
+
+			cameraSpin += delta[0] * sensitivity;
+			cameraRoll += delta[1] * sensitivity;
+		}
+
+		currTouch = newTouch;
+	}
+});
+
+document.addEventListener("touchend", (event) => {
+	const touch = Array.from(event.changedTouches).find(touch => touch.identifier === currTouch[2]);
+
+	if (touch != null) {
+		touchViewport = false;
+	}
+});
+
+
+// Controls.
+
+if (window.innerWidth < 700) {
+	inputResolution.value = "128,128,2";
+}
+
 inputHandler(inputResolution, value => {
 	const [w, h, scale] = value.split(",").map(s => Number(s));
 
 	pcv.setResolution(w, h, scale);
-	// viewportCanvas.style.maxWidth = `${w * scale}px`;
 });
 
 const inputFOVUpdate = inputHandler(inputFOV, () => {
@@ -376,17 +438,17 @@ function h(tag, attributes, ...nodes) {
 
 /**
  * @param {HTMLSelectElement|HTMLInputElement} input 
- * @param {(value: string) => void} onchange
+ * @param {(value: string, init: boolean) => void} onchange
  * @returns {(value: any) => void} Call to change value
  */
 function inputHandler(input, onchange) {
 	function listener() {
-		onchange(input.value);
+		onchange(input.value, false);
 	}
 
 	input[input instanceof HTMLSelectElement ? "onchange" : "oninput"] = listener;
 
-	listener();
+	onchange(input.value, true);
 
 	if (input instanceof HTMLInputElement) {
 		return (value) => {
@@ -405,9 +467,4 @@ function inputHandler(input, onchange) {
 	}
 }
 
-window["ramp"] = function (c, w) {
-	return {
-		offset: 0.5 - c/w,
-		gradient: 1/w,
-	};
-};
+loadExample();
