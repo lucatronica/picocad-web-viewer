@@ -32,5 +32,4 @@ if (oneShot) {
 
 ## TODO:
 
-* Scaling viewer with `image-rendering: pixelated` not working on Safari.
 * Give option to fix Z-fighting on model load, maybe provide user directed method to resolve.

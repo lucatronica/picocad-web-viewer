@@ -210,9 +210,8 @@ viewportCanvas.onwheel = (event) => {
 inputHandler(inputResolution, value => {
 	const [w, h, scale] = value.split(",").map(s => Number(s));
 
-	viewportCanvas.width = w;
-	viewportCanvas.height = h;
-	viewportCanvas.style.maxWidth = `${w * scale}px`;
+	pcv.setResolution(w, h, scale);
+	// viewportCanvas.style.maxWidth = `${w * scale}px`;
 });
 
 const inputFOVUpdate = inputHandler(inputFOV, () => {

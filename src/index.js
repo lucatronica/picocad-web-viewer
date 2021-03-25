@@ -5,6 +5,7 @@ import { Pass, WirePass } from "./pass";
 import { PICO_COLORS } from "./pico";
 import { ShaderProgram } from "./shader-program";
 import { createColorLightMap, createTextureLightMap } from "./lighting";
+import { isSafari } from "./environment";
 
 export default class PicoCADViewer {
 	/**
@@ -18,6 +19,7 @@ export default class PicoCADViewer {
 	 * @param {boolean} [options.shading] If all faces should be draw without lighting. Defaults to true.
 	 * @param {PicoCADRenderMode} [options.renderMode] The style draw the model. Defaults to "texture".
 	 * @param {{x: number, y: number, z: number}} [options.lightDirection] Defaults to {x: 1, y: -1, z: 0}.
+	 * @param {{width: number, height: number, scale?: number}} [options.resolution] Defaults to {width: 128, height: 128, scale: 1}.
 	 */
 	constructor(options={}) {
 		this.canvas = options.canvas;
@@ -86,12 +88,111 @@ export default class PicoCADViewer {
 		/** @private */
 		this._programWireframe = createWireframeProgram(gl);
 
+		// Handle pixel scaling.
+		if (isSafari) {
+			// Safari does not support `image-rendering: pixelated` on a WebGL canvas.
+			// Need to render to a texture, then draw that scaled up texture to the screen.
+			/** @private */
+			this._programFramebuffer = createFramebufferProgram(gl);
+
+			/** @private */
+			this._depthBuffer = gl.createRenderbuffer();
+
+			/** @private */
+			this._frameBuffer = gl.createFramebuffer();
+
+			/** @private */
+			this._screenQuads = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, this._screenQuads);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+				-1, -1,
+				+1, -1,
+				-1, +1,
+				-1, +1,
+				+1, -1,
+				+1, +1,
+			]), gl.STATIC_DRAW);
+		} else {
+			const className = "pico-cad-viewport"
+
+			this.canvas.classList.add(className);
+
+			/** @private */
+			this._style = document.createElement("style");
+			this._style.textContent = `.${className} { image-rendering: -moz-crisp-edges; image-rendering: pixelated; }`;
+			document.head.append(this._style);
+		}
+
+		// Set resolution. Internally this will also setup Safari framebuffers.
+		const res = options.resolution;
+		if (res == null) {
+			this.setResolution(128, 128, 1);
+		} else {
+			this.setResolution(res.width, res.height, res.scale ?? 1);
+		}
+
 		// Init GL.
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(gl.LEQUAL);
 	}
 
 	/**
+	 * Set the size and scale of the viewport.
+	 * @param {number} width 
+	 * @param {number} height 
+	 * @param {number} [scale] The level of scaling, e.g. '3' means three times as big as the native resolution.
+	 */
+	setResolution(width, height, scale=1) {
+		if (this._resolution != null && this._resolution[0] === width && this._resolution[1] === height && this._resolution[2] === scale) return;
+
+		/** @private */;
+		this._resolution = [width, height, scale, 0, 0];
+
+		const widthScreen = width * scale;
+		const heightScreen = height * scale;
+
+		const gl = this.gl;
+		const canvas = this.canvas;
+
+		if (isSafari) {
+			canvas.width = widthScreen;
+			canvas.height = heightScreen;
+
+			// Update framebuffer resolution.
+			/** @private */
+			this._frameBufferTex = this._createTexture(this._frameBufferTex, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, null, width, height);
+
+			gl.bindRenderbuffer(gl.RENDERBUFFER, this._depthBuffer);
+			gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, width, height);
+
+			gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
+			gl.framebufferTexture2D(
+				gl.FRAMEBUFFER,
+				gl.COLOR_ATTACHMENT0,
+				gl.TEXTURE_2D,
+				this._frameBufferTex,
+				0,
+			);
+			gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this._depthBuffer);
+		} else {
+			canvas.width = width;
+			canvas.height = height;
+		}
+
+		canvas.style.width = `${widthScreen}px`;
+		canvas.style.height = `${heightScreen}px`;
+	}
+
+	getResolution() {
+		return {
+			width: this._resolution[0],
+			height: this._resolution[1],
+			scale: this._resolution[2],
+		};
+	}
+
+	/**
+	 * Creates a nearest neighbor texture with the given formats.
 	 * @private
 	 * @param {WebGLTexture} tex 
 	 * @param {number} internalFormat 
@@ -262,9 +363,16 @@ export default class PicoCADViewer {
 		}
 
 		const gl = this.gl;
+		const canvas = this.canvas;
 
-		// Set viewport.
-		gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+		// Set viewport and framebuffer.
+		if (isSafari) {
+			gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
+
+			gl.viewport(0, 0, this._resolution[0], this._resolution[1]);
+		} else {
+			gl.viewport(0, 0, canvas.width, canvas.height);
+		}
 
 		// Clear screen.
 		const bgColor = this.model.backgroundColor;
@@ -278,7 +386,7 @@ export default class PicoCADViewer {
 		mat4.perspective(
 			mat,
 			this.cameraFOV * Math.PI / 180,
-			this.canvas.width / this.canvas.height,
+			this._resolution[0] / this._resolution[1],
 			0.1,
 			400,
 		);
@@ -309,7 +417,7 @@ export default class PicoCADViewer {
 
 				// Uniforms
 				gl.uniformMatrix4fv(
-					programInfo.program.mvpLocation,
+					programInfo.locations.mvp,
 					false,
 					mat,
 				);
@@ -328,14 +436,14 @@ export default class PicoCADViewer {
 
 				gl.bindBuffer(gl.ARRAY_BUFFER, useColor ? pass.colorUVBuffer : pass.uvBuffer);
 				gl.vertexAttribPointer(
-					programInfo.program.uvLocation,
+					programInfo.locations.uv,
 					2,
 					gl.FLOAT,
 					false,
 					0,
 					0,
 				);
-				gl.enableVertexAttribArray(programInfo.program.uvLocation);
+				gl.enableVertexAttribArray(programInfo.locations.uv);
 
 				// Shader specific data
 				if (programInfo === this._programUnlitTexture) {
@@ -388,7 +496,7 @@ export default class PicoCADViewer {
 
 				// Clean up attributes
 				gl.disableVertexAttribArray(programInfo.program.vertexLocation);
-				gl.disableVertexAttribArray(programInfo.program.uvLocation);
+				gl.disableVertexAttribArray(programInfo.locations.uv);
 				
 				if (programInfo === this._programTexture) {
 					gl.disableVertexAttribArray(programInfo.locations.normal);
@@ -406,7 +514,7 @@ export default class PicoCADViewer {
 
 			// Uniforms
 			gl.uniformMatrix4fv(
-				this._programWireframe.program.mvpLocation,
+				this._programWireframe.locations.mvp,
 				false,
 				mat,
 			);
@@ -434,6 +542,32 @@ export default class PicoCADViewer {
 			gl.enableVertexAttribArray(this._programWireframe.program.vertexLocation);
 
 			gl.drawArrays(gl.LINES, 0, this._wireframe.vertexCount);
+		}
+
+		// Render framebuffer to canvas.
+		if (isSafari) {
+			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+			gl.viewport(0, 0, canvas.width, canvas.height);
+
+			this._programFramebuffer.program.use();
+
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, this._frameBufferTex);
+			gl.uniform1i(this._programFramebuffer.locations.mainTex, 0);
+
+			gl.bindBuffer(gl.ARRAY_BUFFER, this._screenQuads);
+			gl.vertexAttribPointer(
+				this._programFramebuffer.program.vertexLocation,
+				2,
+				gl.FLOAT,
+				false,
+				0,
+				0,
+			);
+			gl.enableVertexAttribArray(this._programFramebuffer.program.vertexLocation);
+
+			gl.drawArrays(gl.TRIANGLES, 0, 6);
 		}
 
 		// // Check if any errors occurred.
@@ -532,6 +666,7 @@ export default class PicoCADViewer {
 			if (!pass.isEmpty()) count++;
 		}
 		if (this.drawWireframe) count++;
+		if (isSafari) count++;
 		return count;
 	}
 
@@ -608,6 +743,19 @@ export default class PicoCADViewer {
 		this._programWireframe.program.free();
 		this._programTexture = null;
 		this._programWireframe = null;
+
+		if (isSafari) {
+			gl.deleteFramebuffer(this._frameBuffer);
+			gl.deleteTexture(this._frameBufferTex);
+			gl.deleteBuffer(this._screenQuads);
+			gl.deleteRenderbuffer(this._depthBuffer);
+			this._programFramebuffer.program.free();
+			this._frameBuffer = null;
+			this._frameBufferTex = null;
+			this._screenQuads = null;
+			this._depthBuffer = null;
+			this._programFramebuffer = null;
+		}
 	}
 }
 
@@ -657,6 +805,7 @@ export default class PicoCADViewer {
 			indexTex: program.getUniformLocation("indexTex"),
 			lightMap: program.getUniformLocation("lightMap"),
 			lightDir: program.getUniformLocation("lightDir"),
+			mvp: program.getUniformLocation("mvp"),
 			lightMapOffset: program.getUniformLocation("lightMapOffset"),
 			lightMapGradient: program.getUniformLocation("lightMapGradient"),
 		}
@@ -695,6 +844,8 @@ export default class PicoCADViewer {
 	return {
 		program: program,
 		locations: {
+			uv: program.getAttribLocation("uv"),
+			mvp: program.getUniformLocation("mvp"),
 			mainTex: program.getUniformLocation("mainTex"),
 		}
 	};
@@ -723,7 +874,39 @@ export default class PicoCADViewer {
 	return {
 		program: program,
 		locations: {
+			mvp: program.getUniformLocation("mvp"),
 			color: program.getUniformLocation("color"),
+		}
+	};
+}
+
+/**
+ * @param {WebGLRenderingContext} gl 
+ */
+ function createFramebufferProgram(gl) {
+	const program = new ShaderProgram(gl, `
+		attribute vec4 vertex;
+
+		varying highp vec2 v_uv;
+
+		void main() {
+			v_uv = 0.5 + vertex.xy * 0.5;
+			gl_Position = vertex;
+		}
+	`, `
+		varying highp vec2 v_uv;
+		
+		uniform sampler2D mainTex;
+
+		void main() {
+			gl_FragColor = texture2D(mainTex, v_uv);
+		}
+	`);
+	
+	return {
+		program: program,
+		locations: {
+			mainTex: program.getUniformLocation("mainTex"),
 		}
 	};
 }

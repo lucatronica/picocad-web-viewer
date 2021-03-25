@@ -37,8 +37,6 @@
 		}
 
 		canvas {
-			image-rendering: -moz-crisp-edges;
-			image-rendering: pixelated;
 			display: block;
 		}
 
@@ -86,6 +84,8 @@
 			margin-right: 10px;
 			background: #000;
 			flex-shrink: 0;
+			image-rendering: -moz-crisp-edges;
+			image-rendering: pixelated;
 		}
 
 		select {
@@ -149,7 +149,7 @@
 	<title>picoCAD Viewer</title>
 </head>
 <body>
-	<canvas id="viewport" width="128" height="128" style="width: 100%; max-width: 640;" aria-label="picoCAD viewport"></canvas>
+	<canvas id="viewport" width="128" height="128" aria-label="picoCAD viewport"></canvas>
 	<div id="info">
 		<canvas id="texture" width="128" height="120" aria-label="picoCAD current model texture"></canvas>
 		<div id="info-details">
@@ -161,8 +161,8 @@
 							<option value="128,128,1">128 x 128</option>
 							<option value="128,128,2">128 x 128 (x2)</option>
 							<option value="128,128,3">128 x 128 (x3)</option>
-							<option value="128,128,4">128 x 128 (x4)</option>
-							<option value="128,128,5" selected>128 x 128 (x5)</option>
+							<option value="128,128,4" selected>128 x 128 (x4)</option>
+							<option value="128,128,5">128 x 128 (x5)</option>
 							<option value="128,128,6">128 x 128 (x6)</option>
 							<option value="192,192,1">192 x 192</option>
 							<option value="192,192,2">192 x 192 (x2)</option>
