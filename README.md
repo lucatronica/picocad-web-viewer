@@ -26,10 +26,12 @@ if (oneShot) {
 		// This callback is called before every frame is drawn.
 		spin += dt;
 		viewer.setTurntableCamera(8, spin, 0.1);
+		viewer.setLightDirectionFromCamera();
 	});
 }
 ```
 
 ## TODO:
 
+* GIF recording (maybe just in the demo and not in the core framework)
 * Give option to fix Z-fighting on model load, maybe provide user directed method to resolve.
