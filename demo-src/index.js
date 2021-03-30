@@ -1,4 +1,6 @@
 import PicoCADViewer from "../src/index";
+import { PicoCADModel } from "../src/model";
+import { urlCompressModel, urlDecompressModel } from "./model-compression";
 
 // Get elements
 const texCanvas = /** @type {HTMLCanvasElement} */(document.getElementById("texture"));
@@ -30,23 +32,29 @@ let cameraTurntableAuto = true;
 let cameraMode = 0;
 
 
-// Example model.
+// Model load wrapper.
 
-function loadExample() {
-	pcv.load("./example.txt").then(loadedModel);
-}
+/**
+ * @param {import("../src/index").PicoCADSource} source 
+ */
+async function loadModel(source, saveToURL=true) {
+	// Load the model.
+	const model = await pcv.load(source);
+	window["model"] = model;
 
+	console.log(`=== load "${model.name}" ===`);
 
-// Extra model loading steps + stats
-
-const texCanvasCtx = texCanvas.getContext("2d");
-
-function loadedModel() {
-	cameraRadius = pcv.model.zoomLevel;
-	
+	// Enable UI hints.
 	viewportCanvas.classList.add("loaded");
 
-	texCanvasCtx.putImageData(pcv.model.texture, 0, 0);
+	// Set turntable radius from zoom level.
+	cameraRadius = model.zoomLevel;
+
+	// Draw texture.
+	texCanvasCtx.putImageData(pcv.modelTexture, 0, 0);
+
+	// Show stats
+	const faceCount = model.objects.reduce((acc, obj) => acc + obj.faces.length, 0);
 
 	while (statsTable.lastChild != null) statsTable.lastChild.remove();
 
@@ -54,8 +62,8 @@ function loadedModel() {
 
 	const stats = {
 		"Colors": pcv.getTextureColorCount(),
-		"Objects": pcv.model.objectCount,
-		"Faces": pcv.model.faceCount,
+		"Objects": model.objects.length,
+		"Faces": faceCount,
 	};
 
 	console.log(`${pcv.getTriangleCount()} triangles, ${pcv.getDrawCallCount()} draw calls`);
@@ -63,7 +71,26 @@ function loadedModel() {
 	for (const [key, value] of Object.entries(stats)) {
 		statsTable.append(h("li", {}, `${key}: ${value}`));
 	}
+
+	// Add compressed model text to URL.
+	if (saveToURL) {
+		const compressed = urlCompressModel(model);
+		history.pushState(null, "", "#" + compressed);
+		console.log(`lzw base64: ${compressed.length} bytes`);
+	}
 }
+
+
+// Example model.
+
+function loadExample(saveToURL=true) {
+	loadModel("./example.txt", saveToURL);
+}
+
+
+// Extra model loading steps + stats
+
+const texCanvasCtx = texCanvas.getContext("2d");
 
 
 // Popups
@@ -394,7 +421,7 @@ window.addEventListener("drop", (event) => {
 
 	const file = event.dataTransfer.files[0];
 	if (file != null) {
-		pcv.load(file).then(loadedModel);
+		loadModel(file);
 	}
 });
 
@@ -402,11 +429,11 @@ window.addEventListener("drop", (event) => {
 document.body.addEventListener("paste", (event) => {
 	const s = event.clipboardData.getData("text/plain");
 	if (s != null) {
-		pcv.load(s).then(loadedModel);
+		loadModel(s);
 	} else {
 		const file = event.clipboardData.files[0];
 		if (file != null) {
-			pcv.load(file).then(loadedModel);
+			loadModel(file);
 		}
 	}
 });
@@ -467,4 +494,21 @@ function inputHandler(input, onchange) {
 	}
 }
 
-loadExample();
+// Load starting model.
+
+if (!loadModelFromURL()) {
+	loadExample(false);
+}
+
+function loadModelFromURL() {
+	if (location.hash.length > 1) {
+		loadModel(urlDecompressModel(location.hash.slice(1)), false);
+		return true;
+	}
+}
+
+onhashchange = (event) => {
+	loadModelFromURL();
+};
+
+window["loadModel"] = loadModel;

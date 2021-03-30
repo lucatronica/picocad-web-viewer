@@ -1,11 +1,13 @@
 import * as mat4 from "../node_modules/gl-matrix/esm/mat4";
 import * as vec3 from "../node_modules/gl-matrix/esm/vec3";
-import { loadPicoCADModel } from "./loader";
+import { prepareModelForRendering } from "./model-gl-loader";
 import { Pass, WirePass } from "./pass";
 import { PICO_COLORS } from "./pico";
 import { ShaderProgram } from "./shader-program";
 import { createColorLightMap, createTextureLightMap } from "./lighting";
 import { isSafari } from "./environment";
+import { PicoCADModel } from "./model";
+import { parsePicoCADModel } from "./model-parser";
 
 export default class PicoCADViewer {
 	/**
@@ -49,10 +51,12 @@ export default class PicoCADViewer {
 		/** The camera field-of-view in degrees. */
 		this.cameraFOV = options.fov ?? 90;
 
-		/** If a model has been loaded. @readonly */
+		/** If a model has been loaded. */
 		this.loaded = false;
-		/** Information about the current model. @readonly @type {{name: string, backgroundIndex: number, zoomLevel: number, backgroundColor: number[], alphaIndex: number, alphaColor: number[], texture: ImageData, textureColorFlags: boolean[]}} */
+		/** The current loaded model. @type {PicoCADModel} */
 		this.model = null;
+		/** The current loaded texture as an image. See `viewer.model.texture` for the raw indices. @type {ImageData} */
+		this.modelTexture = null;
 
 		/** If the model should be drawn with lighting. */
 		this.shading = options.shading ?? true;
@@ -244,8 +248,8 @@ export default class PicoCADViewer {
 
 	/**
 	 * Load a picoCAD model.
-	 * @param {Blob|string|URL} model The string can be a file's contents or a URL to a file.
-	 * @returns The model name.
+	 * @param {PicoCADSource} model The string can be a file's contents or a URL to a file.
+	 * @returns {Promise<PicoCADModel>}
 	 */
 	async load(model) {
 		if (typeof model === "string") {
@@ -258,11 +262,13 @@ export default class PicoCADViewer {
 			await this._loadUrl(model);
 		} else if (model instanceof Blob) {
 			await this._loadBlob(model);
+		} else if (model instanceof PicoCADModel) {
+			this._loadModel(model);
 		} else {
 			throw TypeError();
 		}
 
-		return this.model.name;
+		return this.model;
 	}
 
 	/**
@@ -305,7 +311,18 @@ export default class PicoCADViewer {
 	 * @param {string} source
 	 */
 	_loadString(source) {
+		this._loadModel(parsePicoCADModel(source));
+	}
+
+	/**
+	 * @private
+	 * @param {PicoCADModel} model
+	 */
+	_loadModel(model) {
 		const gl = this.gl;
+
+		this.loaded = false;
+		this.model = null;
 
 		// Free old model resources.
 		if (this.loaded) {
@@ -323,32 +340,17 @@ export default class PicoCADViewer {
 			this._indexTex = null;
 		}
 
-		this.loaded = false;
+		// Prepare model for WebGL rendering.
+		const rendering = prepareModelForRendering(gl, model, this.tesselationCount);
 
-		// Load the model.
-		const model = loadPicoCADModel(this.gl, source, this.tesselationCount);
+		this._passes = rendering.passes;
+		this._wireframe = rendering.wireframe;
+		this._mainTex = this._createTexture(this._mainTex, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, rendering.texture);
+		this._indexTex = this._createTexture(this._indexTex, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, new Uint8Array(rendering.textureIndices), 128, 128);
+		this.modelTexture = rendering.texture;
 
-		this.model = {
-			name: model.name,
-			zoomLevel: model.zoomLevel,
-			backgroundIndex: model.backgroundIndex,
-			backgroundColor: PICO_COLORS[model.backgroundIndex],
-			alphaIndex: model.alphaIndex,
-			alphaColor: PICO_COLORS[model.alphaIndex],
-			texture: model.texture,
-			textureColorFlags: model.textureFlags,
-			faceCount: model.faceCount,
-			objectCount: model.objectCount,
-		};
-		this._passes = model.passes;
-		this._wireframe = model.wireframe;
-
-		// Upload GL textures.
-		this._mainTex = this._createTexture(this._mainTex, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, model.texture);
-		this._indexTex = this._createTexture(this._indexTex, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, new Uint8Array(model.textureIndices), 128, 128);
-
-		// Done :)
 		this.loaded = true;
+		this.model = model;
 	}
 
 	/**
@@ -375,7 +377,7 @@ export default class PicoCADViewer {
 		}
 
 		// Clear screen.
-		const bgColor = this.model.backgroundColor;
+		const bgColor = this.model.backgroundColor();
 
 		gl.clearColor(bgColor[0] / 255, bgColor[1] / 255, bgColor[2] / 255, 1);
 		gl.clearDepth(1.0); 
@@ -643,12 +645,17 @@ export default class PicoCADViewer {
 	 * (There may more used by face colors.)
 	 */
 	getTextureColorCount(includeAlpha=false) {
+		/** @type {boolean[]} */
+		const flags = Array(16).fill(false);
 		let count = 0;
-		for (let i = 0; i < 16; i++) {
-			if ((includeAlpha || i !== this.model.alphaIndex) && this.model.textureColorFlags[i]) {
+
+		for (const index of this.model.texture) {
+			if (!flags[index]) {
+				flags[index] = true;
 				count++;
 			}
 		}
+
 		return count;
 	}
 
@@ -924,4 +931,5 @@ function normalized(vec) {
 	};
 }
 
+/** @typedef {string | URL | Blob | PicoCADModel} PicoCADSource */
 /** @typedef {"texture" | "color" | "none"} PicoCADRenderMode */

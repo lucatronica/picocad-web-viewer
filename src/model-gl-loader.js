@@ -1,66 +1,42 @@
-import { parsePicoCADData } from "./parser-data";
-import { parsePicoCADTexture } from "./parser-texture";
-import { readLine, splitString } from "./parser-utils";
+import { PicoCADModel } from "./model";
 import { Pass, WirePass } from "./pass";
 import { PICO_COLORS } from "./pico";
 
 /**
  * @param {WebGLRenderingContext} gl
- * @param {string} source 
+ * @param {PicoCADModel} model 
  * @param {number} tesselationCount Pass 0 to do no tesselation
  */
-export function loadPicoCADModel(gl, source, tesselationCount) {
-	if (!source.startsWith("picocad;")) {
-		throw Error("Not a picoCAD file.");
-	}
-
-	// Read header.
-	const [header, body] = readLine(source);
-
-	const headerValues = header.split(";");
-	const fileName = headerValues[1];
-	const [bestZoom, bgIndex, alphaIndex] = headerValues.slice(2).map(s => Number(s));
-
-	const [dataStr, texStr] = splitString(body, "%"); 
-
-	// Read data.
-	const data = parsePicoCADData(dataStr);
-	const { passes, faceCount, objectCount, wireframe } = loadModel(gl, data, tesselationCount + 1);
+export function prepareModelForRendering(gl, model, tesselationCount) {
+	const { passes, wireframe } = loadModel(gl, model, tesselationCount + 1);
 
 	// Read texture.
-	const tex = parsePicoCADTexture(readLine(texStr)[1], alphaIndex);
+	const textures = convertTexture(model.texture, model.alphaIndex);
 
 	return {
-		name: fileName,
-		zoomLevel: bestZoom,
-		backgroundIndex: bgIndex,
-		alphaIndex: alphaIndex,
 		passes: passes,
 		wireframe: wireframe,
-		texture: tex.data,
-		textureFlags: tex.flags,
-		textureIndices: tex.indices,
-		faceCount: faceCount,
-		objectCount: objectCount,
+		texture: textures.colors,
+		textureIndices: textures.indices,
 	};
 }
 
 /**
  * @param {WebGLRenderingContext} gl
- * @param {import("./parser-data").LuaPicoCADModel} rawModel 
+ * @param {PicoCADModel} model 
  * @param {number} tn Number of tessellations
  */
-function loadModel(gl, rawModel, tn) {
+function loadModel(gl, model, tn) {
 	const passes = [];
 
 	for (let i = 0; i < 16; i++) {
-		const cull        = i % 2  < 1;
-		const shading    = i % 4  < 2;
+		const doubleSided = i % 2  < 1;
+		const shading     = i % 4  < 2;
 		const texture     = i % 8  < 4;
-		// const priority = i      < 8;
+		// const priority = i      < 8;  // This flag is achieved using the ordering of the passes. That's why it's the last one :)
 		
 		passes.push(new Pass(gl, {
-			cull: cull,
+			cull: !doubleSided,
 			shading: shading,
 			texture: texture,
 			clearDepth: i === 8,
@@ -70,42 +46,31 @@ function loadModel(gl, rawModel, tn) {
 	const wireframePass = new WirePass(gl);
 	const wireframeVertices = wireframePass.vertices;
 
-	let faceCount = 0;
+	for (const object of model.objects) {
+		const pos = object.position;
+		// const rot = object.rotation; // unused?
 
-	for (const object of rawModel.array) {
-		const pos = object.dict.pos.array;
-		// const rot = object.dict.rot.array; // unused?
-
-		const rawVertices = object.dict.v.array.map(la => {
-			const xs = la.array;
+		const rawVertices = object.vertices.map(xs => {
 			return [
 				-xs[0] - pos[0],
 				-xs[1] - pos[1],
 				xs[2] + pos[2],
 			];
 		});
-		
+
 		// pioCAD stores each vertex once.
 		// But we'll have to duplicate vertices across faces!
 
-		for (const face of object.dict.f.array) {
-			faceCount++;
-			const faceIndices = face.array;
-			const dict = face.dict;
-
-			const colorIndex = dict.c;
-			const cull = dict.dbl !== 1;
-			const useShading = dict.noshade !== 1;
-			const useTexture = dict.notex !== 1;
-			const priority = dict.prio === 1;
-			const rawUVs = dict.uv.array;
+		for (const face of object.faces) {
+			const faceIndices = face.indices;
+			const rawUVs = face.uvs;
 
 			// Configure pass based on face props
 			const pass = passes[
-				(cull       ? 0 : 1) +
-				(useShading ? 0 : 2) +
-				(useTexture ? 0 : 4) +
-				(priority   ? 0 : 8)
+				(face.doubleSided       ? 0 : 1) +
+				(face.shading ? 0 : 2) +
+				(face.texture ? 0 : 4) +
+				(face.renderFirst   ? 0 : 8)
 			];
 
 			const vertices = pass.vertices;
@@ -115,7 +80,7 @@ function loadModel(gl, rawModel, tn) {
 			const colorUVs = pass.colorUVs;
 
 			// Color UVs
-			const colorU = 1/256 + colorIndex * (1/128);
+			const colorU = 1/256 + face.colorIndex * (1/128);
 			const colorV = 1;
 
 			// Get current vertex index.
@@ -127,8 +92,9 @@ function loadModel(gl, rawModel, tn) {
 			const faceUVs = [];
 
 			for (let i = 0; i < faceIndices.length; i++) {
-				const vertex = rawVertices[faceIndices[i] - 1];
-				const vertex2 = rawVertices[faceIndices[i === 0 ? faceIndices.length - 1 : i - 1] - 1];
+				const vertex = rawVertices[faceIndices[i]];
+				const vertex2 = rawVertices[faceIndices[i === 0 ? faceIndices.length - 1 : i - 1]];
+				const rawUV = rawUVs[i];
 
 				faceVertices.push(vertex);
 
@@ -138,8 +104,8 @@ function loadModel(gl, rawModel, tn) {
 				);
 
 				faceUVs.push([
-					rawUVs[i * 2] / 16,
-					rawUVs[i * 2 + 1] / 16,
+					rawUV[0] / 16,
+					rawUV[1] / 16,
 				]);
 			}
 
@@ -147,7 +113,7 @@ function loadModel(gl, rawModel, tn) {
 			const faceNormal = calculateFaceNormal(faceVertices);
 
 			// Get triangles
-			if (faceIndices.length === 4 && useTexture && tn > 1) {
+			if (faceIndices.length === 4 && face.texture && tn > 1) {
 				// Tesselate quad.
 				const c0 = faceVertices[0];
 				const c1 = faceVertices[1];
@@ -229,7 +195,7 @@ function loadModel(gl, rawModel, tn) {
 					colorUVs.push(colorU, colorV);
 
 					// Save texture UVs.
-					if (useTexture) {
+					if (face.texture) {
 						const uv = faceUVs[i];
 						uvs.push(uv[0], uv[1]);
 					} else {
@@ -261,8 +227,6 @@ function loadModel(gl, rawModel, tn) {
 	return {
 		passes: passes,
 		wireframe: wireframePass,
-		faceCount: faceCount,
-		objectCount: rawModel.array.length,
 	};
 }
 
@@ -328,3 +292,59 @@ function calculateFaceNormal(vertices) {
 function length(a) {
 	return Math.hypot(a[0], a[1], a[2]);
 }
+
+
+/**
+ * @param {number[]} sourceIndices 
+ * @param {number} alphaIndex
+ * @returns A 128x128 image, and a array of 16 booleans indicating if the give color is used in the model.
+ */
+ export function convertTexture(sourceIndices, alphaIndex) {
+	const imgData = new ImageData(128, 128);
+	const data = imgData.data;
+	const indexArray = /** @type {number[]} */(Array(16384)).fill(255);
+
+	let i = 0;
+	let ti = 0;
+	for (let y = 0; y < 120; y++) {
+		for (let x = 0; x < 128; x++) {
+			const index = sourceIndices[i];
+			
+			if (index === alphaIndex) {
+				// this is transparent
+				indexArray[i] = 255;
+			} else {
+				indexArray[i] = index;
+
+				const rgb = PICO_COLORS[index];
+
+				data[ti    ] = rgb[0];
+				data[ti + 1] = rgb[1];
+				data[ti + 2] = rgb[2];
+				data[ti + 3] = 255;
+			}
+
+			i++;
+			ti += 4;
+		}
+	}
+
+	// Add hidden indices on bottom row for single color faces.
+	for (let i = 0; i < 16; i++) {
+		indexArray[16256 + i] = i;
+
+		const rgb = PICO_COLORS[i];
+
+		const ti = 65024 + i * 4;
+		data[ti    ] = rgb[0];
+		data[ti + 1] = rgb[1];
+		data[ti + 2] = rgb[2];
+		data[ti + 3] = 255;
+	}
+
+	return {
+		colors: imgData,
+		indices: indexArray,
+	};
+}
+
