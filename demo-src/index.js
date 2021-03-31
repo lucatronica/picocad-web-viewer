@@ -547,6 +547,8 @@ function dragEnd() {
 window.addEventListener("drop", (event) => {
 	event.preventDefault();
 
+	dragDepthCount = 0;
+
 	dragEnd();
 
 	const file = event.dataTransfer.files[0];
