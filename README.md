@@ -33,5 +33,5 @@ if (oneShot) {
 
 ## TODO:
 
-* GIF recording (maybe just in the demo and not in the core framework)
+* Improve triangulation of complex faces to reduce UV distortion.
 * Give option to fix Z-fighting on model load, maybe provide user directed method to resolve.
