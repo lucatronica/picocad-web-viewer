@@ -16,6 +16,7 @@
 			--fg: #fff;
 			--fg2: #b0b0b0;
 			--border: #606060;
+			--recording: #ffff00;
 		}
 
 		body {
@@ -87,11 +88,17 @@
 			image-rendering: pixelated;
 		}
 
-		select {
+		select, button {
 			border: 1px solid var(--border);
 			font: inherit;
 			color: inherit;
 			background: var(--bg);
+		}
+		button {
+			cursor: pointer;
+		}
+		button:hover {
+			border-color: var(--fg2);
 		}
 		input[type="color"] {
 			border: 1px solid var(--border);
@@ -143,6 +150,10 @@
 		.popup > * {
 			max-width: 700px;
 			margin: auto;
+		}
+
+		.recording {
+			outline: 1px solid var(--recording);
 		}
 
 		@media (max-width: 699px) {
@@ -228,6 +239,18 @@
 						<output></output>
 					</label>
 				</div>
+				<div>
+					<label>
+						GIF FPS
+						<select id="input-gif-fps">
+							<option value="2" selected>50</option>
+							<option value="3">33.3</option>
+							<option value="4">25</option>
+							<option value="5">20</option>
+						</select>
+					</label>
+					<button id="btn-record-gif">Record GIF</button>
+				</div>
 			</div>
 			<ul id="stats"></ul>
 		</div>
@@ -250,6 +273,8 @@
 			<p>Left click and drag to exit turntable mode and rotate the camera. Right click and drag to pan the camera.</p>
 			<hr>
 			<p>Double-click to enter first-person mode. Aim using mouse. Move using <kbd>WASD</kbd>, <kbd>Q</kbd>, <kbd>E</kbd>, <kbd>shift</kbd> and <kbd>space</kbd>.</p>
+			<hr>
+			<p>GIFs can be recorded using <kbd>G</kbd> or the "Record GIF" button. When in turntable mode, the recording will automatically stop after a single cycle. The maximum length is 30 seconds.</p>
 			<hr>
 			<p>Other shortcuts:</p>
 			<ul>

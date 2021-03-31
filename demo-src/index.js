@@ -1,6 +1,8 @@
 import PicoCADViewer from "../src/index";
 import { PicoCADModel } from "../src/model";
 import { urlCompressModel, urlDecompressModel } from "./model-compression";
+import { GIFEncoder } from "./gifenc";
+import { PICO_COLORS } from "../src/pico";
 
 // Get elements
 const texCanvas = /** @type {HTMLCanvasElement} */(document.getElementById("texture"));
@@ -13,6 +15,8 @@ const inputRenderMode = /** @type {HTMLSelectElement} */(document.getElementById
 const inputShading = /** @type {HTMLInputElement} */(document.getElementById("input-shading"));
 const inputFOV = /** @type {HTMLInputElement} */(document.getElementById("input-fov"));
 const btnShowControls = /** @type {HTMLButtonElement} */(document.getElementById("btn-show-controls"));
+const inputGifFps = /** @type {HTMLInputElement} */(document.getElementById("input-gif-fps"));
+const btnRecordGIF = /** @type {HTMLButtonElement} */(document.getElementById("btn-record-gif"));
 const popupControls = document.getElementById("popup-controls")
 const statsTable = document.getElementById("stats");
 
@@ -111,6 +115,96 @@ popupControls.querySelectorAll("kbd").forEach(kbd => {
 });
 
 
+// GIF recording
+
+/** @type {import("./gifenc").GIFPalette} */
+const gifPalette = PICO_COLORS.slice();
+const GIF_MAX_LEN = 30; // seconds
+const gifRecorder = new GIFEncoder();
+
+let gifDelay = 0.02;
+let gifRecording = false;
+let gifTime = 0;
+let gifInitialSpin = 0;
+
+function toggleGifRecording() {
+	if (gifRecording) {
+		stopRecordingGif();
+	} else {
+		startRecordingGif();
+	}
+}
+
+function startRecordingGif() {
+	gifRecording = true;
+	gifTime = 0;
+	gifInitialSpin = cameraSpin;
+
+	btnRecordGIF.textContent = "Recording GIF...";
+	btnRecordGIF.classList.add("recording");
+	viewportCanvas.classList.add("recording");
+	inputGifFps.disabled = true;
+}
+
+function stopRecordingGif() {
+	gifRecording = false;
+
+	btnRecordGIF.textContent = "Record GIF";
+	btnRecordGIF.classList.remove("recording");
+	viewportCanvas.classList.remove("recording");
+	inputGifFps.disabled = false;
+
+	// Render GIF
+	const res = pcv.getResolution();
+	console.log(gifFrames.length);
+
+	for (let i = 0; i < gifFrames.length; i++) {
+		gifRecorder.writeFrame(gifFrames[i], res.width * res.scale, res.height * res.scale, {
+			palette: i === 0 ? gifPalette : null,
+			delay: gifDelay * 1000,
+		});
+	}
+
+	gifRecorder.finish();
+
+	downloadGif();
+
+	gifRecorder.reset();
+	gifFrames = [];
+}
+
+function downloadGif() {
+	const fileName = `${pcv.model.name}.gif`;
+
+	const file = new File([ gifRecorder.bytesView() ], fileName, {
+		type: "image/gif",
+	});
+
+	const url = URL.createObjectURL(file);
+
+	const a = document.createElement("a");
+	a.href = url;
+	a.download = fileName;
+	document.body.append(a);
+	a.click();
+
+	a.remove();
+	URL.revokeObjectURL(url);
+	
+	console.log(`downloaded ${fileName} ${file.size / 1024}kb`);
+}
+
+/** @type {Uint8Array[]} */
+let gifFrames = [];
+
+function putGifFrame() {
+	const res = pcv.getResolution();
+	const indices = pcv.getPixelIndices(res.scale);
+
+	gifFrames.push(indices);
+}
+
+
 // Input
 
 /**
@@ -127,6 +221,8 @@ function keyPressed(key) {
 		inputShadingHandler(!inputShading.checked);
 	} else if (key === "/" || key === "?") {
 		loadExample();
+	} else if (key === "g") {
+		toggleGifRecording();
 	}
 }
 
@@ -332,7 +428,17 @@ const inputShadingHandler = inputHandler(inputShading, () => {
 	pcv.shading = inputShading.checked;
 });
 
+const inputGifFpsHandler = inputHandler(inputGifFps, value => {
+	gifDelay = Number(value) / 100;
+});
+
+btnRecordGIF.onclick = () => {
+	toggleGifRecording();
+};
+
+
 // Render loop
+
 pcv.startDrawLoop((dt) => {
 	// Camera controls
 	const lookSpeed = 1.2 * dt;
@@ -392,23 +498,47 @@ pcv.startDrawLoop((dt) => {
 	}
 
 	pcv.setLightDirectionFromCamera();
+}, (dt) => {
+	if (gifRecording) {
+		const prev = gifTime;
+		gifTime += dt;
+
+		if (gifTime >= GIF_MAX_LEN || (inputAutoTurn && Math.abs(gifInitialSpin - cameraSpin) >= Math.PI * 2)) {
+			stopRecordingGif();
+		} else if (prev === 0 || Math.floor(prev / gifDelay) !== Math.floor(gifTime / gifDelay)) {
+			putGifFrame();
+		}
+	}
 });
 
 
 // Handle file dropping.
+
 window.addEventListener("dragover", (event) => {
 	event.preventDefault();
 });
 
+let dragDepthCount = 0;
+
 window.addEventListener("dragenter", (event) => {
-	if (event.dataTransfer.types.includes("Files")) {
-		document.body.classList.add("drag");
+	if (dragDepthCount === 0) {
+		if (event.dataTransfer.types.includes("Files")) {
+			document.body.classList.add("drag");
+		}
+	}
+
+	dragDepthCount++;
+});
+
+
+window.addEventListener("dragleave", (event) => {
+	dragDepthCount--;
+
+	if (dragDepthCount === 0) {
+		dragEnd();
 	}
 });
 
-window.addEventListener("dragexit", (event) => {
-	dragEnd();
-});
 
 function dragEnd() {
 	document.body.classList.remove("drag");
@@ -479,6 +609,7 @@ function inputHandler(input, onchange) {
 
 	if (input instanceof HTMLInputElement) {
 		return (value) => {
+			if (input.disabled) return;
 			if (typeof value === "boolean") {
 				input.checked = value;
 			} else {
@@ -488,6 +619,7 @@ function inputHandler(input, onchange) {
 		};
 	} else {
 		return (value) => {
+			if (input.disabled) return;
 			input.value = value;
 			listener();
 		};

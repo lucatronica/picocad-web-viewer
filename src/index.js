@@ -22,6 +22,7 @@ export default class PicoCADViewer {
 	 * @param {PicoCADRenderMode} [options.renderMode] The style draw the model. Defaults to "texture".
 	 * @param {{x: number, y: number, z: number}} [options.lightDirection] Defaults to {x: 1, y: -1, z: 0}.
 	 * @param {{width: number, height: number, scale?: number}} [options.resolution] Defaults to {width: 128, height: 128, scale: 1}.
+	 * @param {boolean} [options.preserveDrawingBuffer] If the true, the browser will not clear the buffer after drawing as completed. This is needed for `getPixelIndices` to work asynchronously. May have performance impact. Defaults to false.
 	 */
 	constructor(options={}) {
 		this.canvas = options.canvas;
@@ -32,6 +33,7 @@ export default class PicoCADViewer {
 		/** The webGL rendering context. */
 		const gl = this.gl = this.canvas.getContext("webgl", {
 			antialias: false,
+			preserveDrawingBuffer: options.preserveDrawingBuffer ?? false,
 		});
 		
 		/** Camera position in scene. */
@@ -571,42 +573,37 @@ export default class PicoCADViewer {
 
 			gl.drawArrays(gl.TRIANGLES, 0, 6);
 		}
-
-		// // Check if any errors occurred.
-		// const error = gl.getError();
-		// if (error !== 0) {
-		// 	throw Error(
-		// 		({
-		// 			[gl.INVALID_ENUM]: "Invalid enum",
-		// 			[gl.INVALID_VALUE]: "Invalid value",
-		// 			[gl.INVALID_OPERATION]: "Invalid operation",
-		// 			[gl.INVALID_FRAMEBUFFER_OPERATION]: "Invalid framebuffer operation",
-		// 			[gl.OUT_OF_MEMORY]: "Out of memory",
-		// 			[gl.CONTEXT_LOST_WEBGL]: "Lost context",
-		// 		})[error] ?? "Unknown WebGL Error"
-		// 	);
-		// }
 	}
 
 	/**
-	 * @param {(dt: number) => void} [callback] Called before the start of every draw. `dt` is the seconds since last draw.
+	 * @param {(dt: number) => void} [preDrawCallback] Called before the start of every draw. `dt` is the seconds since last draw.
+	 * @param {(dt: number) => void} [postDrawCallback] Called after every draw. `dt` is the seconds since last draw completed.
 	 */
-	startDrawLoop(callback) {
+	startDrawLoop(preDrawCallback, postDrawCallback) {
 		let then = performance.now();
+		let drawThen = then;
+
 		const loop = () => {
-			if (callback != null) {
+			if (preDrawCallback != null) {
 				const now = performance.now();
 				const dt = (now - then) / 1000;
-				callback(dt);
+				preDrawCallback(dt);
 				then = now;
 			}
 
 			this.draw();
 
+			if (postDrawCallback != null) {
+				const now = performance.now();
+				const dt = (now - drawThen) / 1000;
+				postDrawCallback(dt);
+				drawThen = now;
+			}
+
 			/** @private */
 			this._rafID = requestAnimationFrame(loop);
 		};
-		loop();
+		this._rafID = requestAnimationFrame(loop);
 	}
 
 	stopDrawLoop() {
@@ -722,6 +719,80 @@ export default class PicoCADViewer {
 			x: -roll,
 			z: 0,
 		};
+	}
+
+	/**
+	 * Get the rendered pixels as PICO-8 indices (top to bottom, left to right).
+	 * 
+	 * By default this only works if called right after the frame is drawn (e.g. after `draw()` or in the post draw callback of `startDrawLoop()`).
+	 * 
+	 * Set `preserveDrawingBuffer: true` in the viewer options to allow calling this method asynchronously.
+	 * @param {number} [scale] Upscale by repeating indices. Defaults to 1.
+	 * @returns {Uint8Array}
+	 */
+	getPixelIndices(scale=1) {
+		const gl = this.gl;
+		const [width, height] = this._resolution;
+		const count = width * height;
+		const outWidth1 = width * scale;
+		const outWidth2 = outWidth1 * scale;
+		const scaleMultiple = scale * scale;
+		scale = Math.max(1, Math.floor(scale));
+
+		const buffer = new Uint8Array(count * 4);
+		
+		if (isSafari) {
+			gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
+		}
+
+		gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, buffer);
+
+		if (isSafari) {
+			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		}
+
+		// Just use green channel to map from color => index.
+		// (Each green value is unique except for black/red both 0).
+		const greens = PICO_COLORS.map(color => color[1]);
+
+		// Convert.
+		// Note the WebGL buffer is top to bottom.
+		const indices = new Uint8Array(count * scaleMultiple);
+
+		let bufRowIndex = (count - width) * 4;
+		let outRowIndex = 0;
+
+		for (let y = 0; y < height; y++) {
+			let bufIndex = bufRowIndex;
+			let outIndex = outRowIndex;
+
+			for (let x = 0; x < width; x++) {
+				const r = buffer[bufIndex];
+				const g = buffer[bufIndex + 1];
+				const index = (r === 0 && g === 0) ? 0 : greens.indexOf(g, 1);
+
+				if (scale === 1) {
+					indices[outIndex] = index;
+				} else {
+					// Repeat index in square region.
+					let outIndexLoc = outIndex;
+					for (let sy = 0; sy < scale; sy++) {
+						for (let sx = 0; sx < scale; sx++) {
+							indices[outIndexLoc + sx] = index;
+						}
+						outIndexLoc += outWidth1;
+					}
+				}
+				
+				outIndex += scale;
+				bufIndex += 4;
+			}
+
+			bufRowIndex -= width * 4;
+			outRowIndex += outWidth2;
+		}
+
+		return indices;
 	}
 
 	/**
