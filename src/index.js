@@ -1088,7 +1088,7 @@ export default class PicoCADViewer {
 			highp float index = texture2D(indexTex, v_uv).r;
 			if (index == 1.0) discard;
 			highp float intensity = clamp(lightMapGradient * abs(dot(v_normal, lightDir)) + lightMapOffset, 0.0, 1.0);
-			gl_FragColor = texture2D(lightMap, vec2(index * 15.9375 + mod(gl_FragCoord.x + gl_FragCoord.y, 2.0) * 0.03125, 1.0 - intensity));
+			gl_FragColor = texture2D(lightMap, vec2(0.015625 + index * 15.9375 + mod(gl_FragCoord.x + gl_FragCoord.y, 2.0) * 0.03125, 1.0 - intensity));
 		}
 	`);
 	
@@ -1133,7 +1133,7 @@ function createUnlitTextureProgram(gl) {
 		void main() {
 			highp float index = texture2D(indexTex, v_uv).r;
 			if (index == 1.0) discard;
-			gl_FragColor = texture2D(lightMap, vec2(index * 15.9375, 0.0));
+			gl_FragColor = texture2D(lightMap, vec2(0.015625 + index * 15.9375, 0.0));
 		}
 	`);
 	
