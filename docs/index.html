@@ -111,7 +111,9 @@
 			cursor: pointer;
 		}
 		select {
+			-webkit-appearance: none;
 			border: none;
+			border-radius: 0;
 			border-bottom: 1px solid #404040;
 		}
 		select:hover, select:focus {
@@ -130,16 +132,19 @@
 			border: 1px solid var(--border);
 		}
 		input[type="checkbox"] {
+			position: relative;
 			-webkit-appearance: none;
 			width: 42px;
-			/* margin: 0;
-			margin-top: 6px; */
+			height: 22px;
+			border: none;
 			cursor: pointer;
 			background: #303030;
 			border-radius: 99px;
-			padding: 2px;
 		}
 		input[type="checkbox"]::after {
+			position: absolute;
+			top: 2px;
+			left: 2px;
 			content: '.';
 			display: block;
 			background: #9c8491;
