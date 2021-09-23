@@ -8,6 +8,7 @@ import { createColorLightMap, createTextureLightMap } from "./lighting";
 import { isSafari } from "./environment";
 import { PicoCADModel } from "./model";
 import { parsePicoCADModel } from "./model-parser";
+import { rgbToInt } from "./color";
 
 export default class PicoCADViewer {
 	/**
@@ -57,13 +58,16 @@ export default class PicoCADViewer {
 		this.loaded = false;
 		/** The current loaded model. @type {PicoCADModel} */
 		this.model = null;
-		/** The current loaded texture as an image. See `viewer.model.texture` for the raw indices. @type {ImageData} */
-		this.modelTexture = null;
 
 		/** If the model should be drawn with lighting. */
 		this.shading = options.shading ?? true;
 		/** The style draw the model. */
 		this.renderMode = options.renderMode ?? "texture";
+		/**
+		 * A custom background color. As [R, G, B] (each component [0, 1]).
+		 * @type {number[]}
+		 */
+		this.backgroundColor = null;
 		/** If the wireframe should be drawn. */
 		this.drawWireframe = options.drawWireframe ?? false;
 		/** If the wireframe should be drawn "through" the model. */
@@ -74,21 +78,25 @@ export default class PicoCADViewer {
 		this.tesselationCount = options.tesselationCount ?? 3;
 		/** The lighting direction. Does not have to be normalized. */
 		this.lightDirection = options.lightDirection ?? {x: 1, y: -1, z: 0};
+		/** Set the options for the HD texture shader. */
+		this.hdOptions = {
+			shadingSteps: 4,
+			shadingColor: [0.1, 0.1, 0.1],
+		};
 
 		/** @private @type {Pass[]} */
 		this._passes = [];
 		/** @private @type {WebGLTexture} */
-		this._mainTex = null;
+		this._colorIndexTex = this._createTexture(null, this.gl.LUMINANCE, this.gl.LUMINANCE, this.gl.UNSIGNED_BYTE, new Uint8Array([ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]), 16, 1);
 		/** @private @type {WebGLTexture} */
 		this._indexTex = null;
-		/** @private */
-		this._lightMapTex = this._createTexture(null, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, createTextureLightMap());
-		/** @private */
-		this._colorLightMapTex = this._createTexture(null, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, createColorLightMap());
+		this.resetLightMap();
 		/** @private */
 		this._programTexture = createTextureProgram(gl);
 		/** @private */
 		this._programUnlitTexture = createUnlitTextureProgram(gl);
+		/** @private */
+		this._programHDTexture = createHDTextureProgram(gl);
 		/** @private @type {WirePass} */
 		this._wireframe = null;
 		/** @private */
@@ -140,6 +148,7 @@ export default class PicoCADViewer {
 		// Init GL.
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(gl.LEQUAL);
+		gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 	}
 
 	/**
@@ -195,6 +204,189 @@ export default class PicoCADViewer {
 			height: this._resolution[1],
 			scale: this._resolution[2],
 		};
+	}
+
+	/**
+	 * @deprecated Should call `this.getModelTexture()` instead to make performance side-effects explicit.
+	 */
+	get modelTexture() {
+		return this.getModelTexture();
+	}
+
+	/**
+	 * Get the current model's texture as pixels using the current palette.
+	 */
+	getModelTexture() {
+		return this.model.textureAsImage(this._lightMapColors);
+	}
+
+	/**
+	 * Set light-maps to default state (accurate picoCad emulation).
+	 */
+	resetLightMap() {
+		if (this._lightMapTex != null) this.gl.deleteTexture(this._lightMapTex);
+		if (this._colorLightMapTex != null) this.gl.deleteTexture(this._colorLightMapTex);
+
+		/** @private */
+		this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, createTextureLightMap());
+		/** @private */
+		this._colorLightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, createColorLightMap());
+		/** @type {number[][]} @private */
+		this._lightMapColors = PICO_COLORS.slice();
+	}
+
+	/**
+	 * The main 16 RGB255 colors used in the current light-map.
+	 * 
+	 * For the default light-map this just returns the PICO-8 colors.
+	 * 
+	 * Note a custom light-map may contain additional colors not in the returned array, due to shading and dithering.
+	 * @returns {number[][]}
+	 */
+	getPalette() {
+		return this._lightMapColors;
+	}
+
+	/**
+	 * @param {ImageData} imageData
+	 * @private
+	 */
+	_getLightMapColors(imageData) {
+		const colors = Array(16);
+		for (let i = 0; i < 16; i++) {
+			let ti = i * 8;
+			colors[i] = [
+				imageData.data[ti    ],
+				imageData.data[ti + 1],
+				imageData.data[ti + 2],
+			];
+		}
+		return colors;
+	}
+
+	/**
+	 * Override the default light-maps (texture and color).
+	 * 
+	 * The passed image-data must be 32 pixels wide, but can be of any height.
+	 * 
+	 * Each 2-pixel-column specifies the lightning for one color. Top-to-bottom maps light-to-dark. The two columns are used to provide dithering.
+	 * @param {ImageData} imageData
+	 */
+	setLightMap(imageData) {
+		if (this._lightMapTex != null) this.gl.deleteTexture(this._lightMapTex);
+		if (this._colorLightMapTex != null) this.gl.deleteTexture(this._colorLightMapTex);
+
+		this._lightMapColors = this._getLightMapColors(imageData);
+
+		this._colorLightMapTex = this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, imageData);
+	}
+
+	/**
+	 * Override the default texture light-map.
+	 * @param {ImageData} imageData
+	 */
+	setTextureLightMap(imageData) {
+		if (this._lightMapTex != null) this.gl.deleteTexture(this._lightMapTex);
+
+		this._lightMapColors = this._getLightMapColors(imageData);
+
+		this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, imageData);
+	}
+	
+	/**
+	 * Override the default color light-map.
+	 * @param {ImageData} imageData
+	 */
+	setColorLightMap(imageData) {
+		if (this._colorLightMapTex != null) this.gl.deleteTexture(this._colorLightMapTex);
+
+		this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, imageData);
+	}
+
+	/**
+	 * @private
+	 */
+	_freeMainTexture() {
+		if (this._indexTex != null) {
+			this.gl.deleteTexture(this._indexTex);
+			this._indexTex = null;
+		}
+	}
+
+	/**
+	 * @param {ImageData|number[]|Uint8Array} src
+	 * @param {number} [width] Required if passing an index array via `src`.
+	 * @param {number} [height] Required if passing an index array via `src`.
+	 */
+	setIndexTexture(src, width, height) {
+		/** @type {ImageData} */
+		let imageData;
+		/** @type {Uint8Array} */
+		let indices;
+
+		if (src instanceof ImageData) {
+			// Passed image data/pixels.
+			imageData = src;
+
+			// Convert pixels to indices
+			const n = imageData.width * imageData.height;
+			indices = new Uint8Array(n);
+			const colorToIndex = new Map(PICO_COLORS.map(([r, g, b], i) => [ 0xff000000 | (b << 16) | (g << 8) | r, i ]));
+			const ints = new Int32Array(src.data.buffer);
+
+			for (let i = 0; i < n; i++) {
+				const int = ints[i];
+				indices[i] = colorToIndex.get(int) ?? 0;
+			}
+		} else {
+			// Passed an index array.
+			if (src instanceof Uint8Array) {
+				indices = src;
+			} else {
+				indices = new Uint8Array(src);
+			}
+
+			// Convert indices to pixels
+			imageData = new ImageData(width, height);
+			const data = imageData.data;
+
+			let i = 0;
+			for (let y = 0; y < height; y++) {
+				for (let x = 0; x < width; x++) {
+					const [r, g, b] = PICO_COLORS[i] ?? PICO_COLORS[0];
+					data[i++] = r;
+					data[i++] = g;
+					data[i++] = b;
+					data[i++] = 255;
+				}
+			}
+		}
+
+		
+
+		// Create textures
+		this._freeMainTexture();
+		this._indexTex = this._createTexture(this._indexTex, this.gl.LUMINANCE, this.gl.LUMINANCE, this.gl.UNSIGNED_BYTE, indices, imageData.width, imageData.height);
+	}
+
+	/**
+	 * @param {TexImageSource} texture 
+	 */
+	setHDTexture(texture) {
+		if (texture == null) {
+			this.removeHDTexture();
+			return;
+		}
+
+		/** @private */
+		this._hdTex = this._createTexture(this._hdTex, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, texture);
+	}
+
+	removeHDTexture() {
+		if (this._hdTex != null) {
+			this.gl.deleteTexture(this._hdTex);
+			this._hdTex = null;
+		}
 	}
 
 	/**
@@ -335,9 +527,6 @@ export default class PicoCADViewer {
 
 			this._wireframe.free();
 
-			gl.deleteTexture(this._mainTex);
-			this._mainTex = null;
-
 			gl.deleteTexture(this._indexTex);
 			this._indexTex = null;
 		}
@@ -347,9 +536,7 @@ export default class PicoCADViewer {
 
 		this._passes = rendering.passes;
 		this._wireframe = rendering.wireframe;
-		this._mainTex = this._createTexture(this._mainTex, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, rendering.texture);
 		this._indexTex = this._createTexture(this._indexTex, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, new Uint8Array(rendering.textureIndices), 128, 128);
-		this.modelTexture = rendering.texture;
 
 		this.loaded = true;
 		this.model = model;
@@ -379,9 +566,13 @@ export default class PicoCADViewer {
 		}
 
 		// Clear screen.
-		const bgColor = this.model.backgroundColor();
+		if (this.backgroundColor == null) {
+			const bgColor = this._lightMapColors[this.model.backgroundIndex];
+			gl.clearColor(bgColor[0] / 255, bgColor[1] / 255, bgColor[2] / 255, 1);
+		} else {
+			gl.clearColor(this.backgroundColor[0], this.backgroundColor[1], this.backgroundColor[2], 1);
+		}
 
-		gl.clearColor(bgColor[0] / 255, bgColor[1] / 255, bgColor[2] / 255, 1);
 		gl.clearDepth(1.0); 
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
@@ -415,7 +606,8 @@ export default class PicoCADViewer {
 				}
 
 				const useColor = forceColor || !pass.texture;
-				const programInfo = (this.shading && pass.shading) ? this._programTexture : this._programUnlitTexture;
+				// const programInfo = this._hdTex == null ? ((this.shading && pass.shading) ? this._programTexture : this._programUnlitTexture) : this._programHDTexture;
+				const programInfo = (this._hdTex == null || useColor) ? ((this.shading && pass.shading) ? this._programTexture : this._programUnlitTexture) : this._programHDTexture;
 
 				programInfo.program.use();
 
@@ -451,14 +643,19 @@ export default class PicoCADViewer {
 
 				// Shader specific data
 				if (programInfo === this._programUnlitTexture) {
-					// Main texture
+					// Index texture
 					gl.activeTexture(gl.TEXTURE0);
-					gl.bindTexture(gl.TEXTURE_2D, this._mainTex);
-					gl.uniform1i(programInfo.locations.mainTex, 0);
+					gl.bindTexture(gl.TEXTURE_2D, useColor ? this._colorIndexTex : this._indexTex);
+					gl.uniform1i(programInfo.locations.indexTex, 0);
+
+					// Light-map texture
+					gl.activeTexture(gl.TEXTURE1);
+					gl.bindTexture(gl.TEXTURE_2D, useColor ? this._colorLightMapTex : this._lightMapTex);
+					gl.uniform1i(programInfo.locations.lightMap, 1);
 				} else if (programInfo === this._programTexture) {
 					// Index texture
 					gl.activeTexture(gl.TEXTURE0);
-					gl.bindTexture(gl.TEXTURE_2D, this._indexTex);
+					gl.bindTexture(gl.TEXTURE_2D, useColor ? this._colorIndexTex : this._indexTex);
 					gl.uniform1i(programInfo.locations.indexTex, 0);
 
 					// Light-map texture
@@ -472,6 +669,30 @@ export default class PicoCADViewer {
 
 					// Light direction
 					gl.uniform3f(programInfo.locations.lightDir, lightVector.x, lightVector.y, lightVector.z);
+
+					// Normal attrib
+					gl.bindBuffer(gl.ARRAY_BUFFER, pass.normalBuffer);
+					gl.vertexAttribPointer(
+						programInfo.locations.normal,
+						3,
+						gl.FLOAT,
+						false,
+						0,
+						0,
+					);
+					gl.enableVertexAttribArray(programInfo.locations.normal);
+				} else if (programInfo === this._programHDTexture) {
+					// Main texture
+					gl.activeTexture(gl.TEXTURE0);
+					gl.bindTexture(gl.TEXTURE_2D, this._hdTex);
+					gl.uniform1i(programInfo.locations.mainTex, 0);
+
+					// Light direction
+					gl.uniform3f(programInfo.locations.lightDir, lightVector.x, lightVector.y, lightVector.z);
+					
+					// HD lighting options
+					gl.uniform1f(programInfo.locations.lightSteps, this.hdOptions.shadingSteps);
+					gl.uniform3f(programInfo.locations.lightAmbient, this.hdOptions.shadingColor[0], this.hdOptions.shadingColor[1], this.hdOptions.shadingColor[2]);
 
 					// Normal attrib
 					gl.bindBuffer(gl.ARRAY_BUFFER, pass.normalBuffer);
@@ -751,15 +972,15 @@ export default class PicoCADViewer {
 			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		}
 
-		// Just use green channel to map from color => index.
-		// (Each green value is unique except for black/red both 0).
-		const greens = PICO_COLORS.map(color => color[1]);
+		// Create color -> index mapping.
+		const paletteColors = new Map(this._lightMapColors.map(([r, g, b], i) => [ rgbToInt(r, g, b), i ]));
 
 		// Convert.
 		// Note the WebGL buffer is top to bottom.
+		const ints = new Uint32Array(buffer.buffer);
 		const indices = new Uint8Array(count * scaleMultiple);
 
-		let bufRowIndex = (count - width) * 4;
+		let bufRowIndex = count - width;
 		let outRowIndex = 0;
 
 		for (let y = 0; y < height; y++) {
@@ -767,9 +988,8 @@ export default class PicoCADViewer {
 			let outIndex = outRowIndex;
 
 			for (let x = 0; x < width; x++) {
-				const r = buffer[bufIndex];
-				const g = buffer[bufIndex + 1];
-				const index = (r === 0 && g === 0) ? 0 : greens.indexOf(g, 1);
+				const int = ints[bufIndex];
+				const index = paletteColors.get(int) ?? 0;
 
 				if (scale === 1) {
 					indices[outIndex] = index;
@@ -785,10 +1005,10 @@ export default class PicoCADViewer {
 				}
 				
 				outIndex += scale;
-				bufIndex += 4;
+				bufIndex++;
 			}
 
-			bufRowIndex -= width * 4;
+			bufRowIndex -= width;
 			outRowIndex += outWidth2;
 		}
 
@@ -810,11 +1030,9 @@ export default class PicoCADViewer {
 
 		gl.deleteTexture(this._lightMapTex);
 		gl.deleteTexture(this._colorLightMapTex);
-		gl.deleteTexture(this._mainTex);
 		gl.deleteTexture(this._indexTex);
 		this._lightMapTex = null;
 		this._colorLightMapTex = null;
-		this._mainTex = null;
 		this._indexTex = null;
 
 		this._programTexture.program.free();
@@ -869,7 +1087,6 @@ export default class PicoCADViewer {
 		void main() {
 			highp float index = texture2D(indexTex, v_uv).r;
 			if (index == 1.0) discard;
-			// highp float intensity = clamp(4.0 * abs(dot(v_normal, lightDir)) - 1.0, 0.0, 1.0);
 			highp float intensity = clamp(lightMapGradient * abs(dot(v_normal, lightDir)) + lightMapOffset, 0.0, 1.0);
 			gl_FragColor = texture2D(lightMap, vec2(index * 15.9375 + mod(gl_FragCoord.x + gl_FragCoord.y, 2.0) * 0.03125, 1.0 - intensity));
 		}
@@ -894,7 +1111,7 @@ export default class PicoCADViewer {
 /**
  * @param {WebGLRenderingContext} gl 
  */
- function createUnlitTextureProgram(gl) {
+function createUnlitTextureProgram(gl) {
 	const program = new ShaderProgram(gl, `
 		attribute vec4 vertex;
 		attribute vec2 uv;
@@ -910,12 +1127,13 @@ export default class PicoCADViewer {
 	`, `
 		varying highp vec2 v_uv;
 		
-		uniform sampler2D mainTex;
+		uniform sampler2D indexTex;
+		uniform sampler2D lightMap;
 
 		void main() {
-			lowp vec4 color = texture2D(mainTex, v_uv);
-			if (color.a == 0.0) discard;
-			gl_FragColor = color;
+			highp float index = texture2D(indexTex, v_uv).r;
+			if (index == 1.0) discard;
+			gl_FragColor = texture2D(lightMap, vec2(index * 15.9375, 0.0));
 		}
 	`);
 	
@@ -924,15 +1142,71 @@ export default class PicoCADViewer {
 		locations: {
 			uv: program.getAttribLocation("uv"),
 			mvp: program.getUniformLocation("mvp"),
-			mainTex: program.getUniformLocation("mainTex"),
+			indexTex: program.getUniformLocation("indexTex"),
+			lightMap: program.getUniformLocation("lightMap"),
 		}
 	};
 }
 
+
 /**
  * @param {WebGLRenderingContext} gl 
  */
- function createWireframeProgram(gl) {
+function createHDTextureProgram(gl) {
+	const program = new ShaderProgram(gl, `
+		attribute vec4 vertex;
+		attribute vec3 normal;
+		attribute vec2 uv;
+
+		varying highp vec2 v_uv;
+		varying highp vec3 v_normal;
+
+		uniform mat4 mvp;
+
+		void main() {
+			v_uv = uv;
+			v_normal = normal;
+			gl_Position = mvp * vertex;
+		}
+	`, `
+		varying highp vec2 v_uv;
+		varying highp vec3 v_normal;
+		
+		uniform highp float lightSteps;
+		uniform sampler2D mainTex;
+		uniform highp vec3 lightDir;
+		uniform highp vec3 lightAmbient;
+
+		void main() {
+			highp vec4 col = texture2D(mainTex, v_uv);
+			if (col.a != 1.0) discard;
+			highp float pixel = mod(gl_FragCoord.x + gl_FragCoord.y, 2.0);
+			highp float intensity = abs(dot(v_normal, lightDir)) * 2.2 - 0.2;
+			intensity = floor(intensity * (lightSteps + 0.5) + pixel/2.0) / lightSteps;
+			intensity = clamp(intensity, 0.0, 1.0);
+			gl_FragColor = vec4(mix(col.rgb * lightAmbient, col.rgb, intensity), 1.0);
+		}
+	`);
+	
+	return {
+		program: program,
+		locations: {
+			uv: program.getAttribLocation("uv"),
+			normal: program.getAttribLocation("normal"),
+			mvp: program.getUniformLocation("mvp"),
+			lightSteps: program.getUniformLocation("lightSteps"),
+			lightAmbient: program.getUniformLocation("lightAmbient"),
+			mainTex: program.getUniformLocation("mainTex"),
+			lightDir: program.getUniformLocation("lightDir"),
+		}
+	};
+}
+
+
+/**
+ * @param {WebGLRenderingContext} gl 
+ */
+function createWireframeProgram(gl) {
 	const program = new ShaderProgram(gl, `
 		attribute vec4 vertex;
 
@@ -961,7 +1235,7 @@ export default class PicoCADViewer {
 /**
  * @param {WebGLRenderingContext} gl 
  */
- function createFramebufferProgram(gl) {
+function createFramebufferProgram(gl) {
 	const program = new ShaderProgram(gl, `
 		attribute vec4 vertex;
 

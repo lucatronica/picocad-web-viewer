@@ -1,10 +1,38 @@
-# WebGL viewer for picoCAD scenes.
+# WebGL viewer for picoCAD files
 
-## [Demo: https://lucatronica.github.io/picocad-web-viewer/](https://lucatronica.github.io/picocad-web-viewer/)
+## [lucatronica.github.io/picocad-web-viewer/](https://lucatronica.github.io/picocad-web-viewer/)
+## [luca.games/picocad/](https://luca.games/picocad/)
 
-## Example usage
+## Light-maps
+
+Color palettes and shading can be customized using light-maps.
+
+![Enlarged default picoCAD light-map](default_texture_lightmap_large.png)
+
+A light-map must be 32 pixels wide, but can be any height.
+
+Each 2-pixel-column specifies the shading for one color.
+
+* Each row is a shading level, going from light-to-dark from top-to-bottom.
+* The pair of pixels in each row are used to control dithering.
+	* To have no dithering make both colors the same.
+* The order of the columns correspond to the PICO-8 color indices.
+
+The default picoCAD light-maps are a good starting point for customization:
+
+Texture ![Default picoCAD texture light-map](default_texture_lightmap.png)
+
+Color ![Default picoCAD color light-map](default_color_lightmap.png)
+
+Note the GIF export feature will break when using custom light-maps with more than 16 colors.
+
+## Usage
+
+The model viewer can be freely used in other contexts.
 
 ```js
+// Example usage //
+
 import PicoCADViewer from "./pico-cad-viewer.esm.js";
 
 const myCanvas = document.getElementByID("my-canvas");
@@ -30,8 +58,3 @@ if (oneShot) {
 	});
 }
 ```
-
-## TODO:
-
-* Improve triangulation of complex faces to reduce UV distortion.
-* Give option to fix Z-fighting on model load, maybe provide user directed method to resolve.

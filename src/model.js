@@ -31,6 +31,48 @@ export class PicoCADModel {
 	alphaColor() {
 		return PICO_COLORS[this.alphaIndex];
 	}
+
+	/**
+	 * Converts the texture to pixels.
+	 * @param {number[][]} [colors] Maps indices to RGB colors. Defaults to the PICO-8 colors.
+	 * @returns {ImageData}
+	 * @example
+	 * let colors = Array(16);
+	 * colors.fill([10, 25, 120])
+	 * model.textureAsImage(colors)
+	 */
+	textureAsImage(colors) {
+		if (colors == null) {
+			colors = PICO_COLORS;
+		}
+
+		const imgData = new ImageData(128, 128);
+		const data = imgData.data;
+		const tex = this.texture;
+		const alphaIndex = this.alphaIndex;
+
+		let i = 0;
+		let ti = 0;
+		for (let y = 0; y < 120; y++) {
+			for (let x = 0; x < 128; x++) {
+				const index = tex[i];
+				
+				if (index !== alphaIndex) {
+					const rgb = colors[index];
+
+					data[ti    ] = rgb[0];
+					data[ti + 1] = rgb[1];
+					data[ti + 2] = rgb[2];
+					data[ti + 3] = 255;
+				}
+
+				i++;
+				ti += 4;
+			}
+		}
+
+		return imgData;
+	}
 }
 
 export class PicoCADModelObject {

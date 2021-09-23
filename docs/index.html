@@ -11,12 +11,16 @@
 		}
 
 		:root {
-			--bg: #383838;
-			--bg2: #404040;
+			--bg: #202020;
 			--fg: #fff;
 			--fg2: #b0b0b0;
 			--border: #606060;
+			--accent: #0077ff;
 			--recording: #ffff00;
+		}
+
+		[hidden] {
+			display: none !important;
 		}
 
 		body {
@@ -78,30 +82,76 @@
 			width: 100%;
 		}
 
+		#info-textures {
+			flex-shrink: 0;
+			margin-right: 10px;
+		}
+
 		#texture {
 			width: 256px;
-			width: 240px;
-			margin-right: 10px;
 			background: #000;
-			flex-shrink: 0;
+			image-rendering: -moz-crisp-edges;
+			image-rendering: pixelated;
+		}
+
+		#texture-hd {
+			display: block;
+			width: 256px;
+			background: #000;
 			image-rendering: -moz-crisp-edges;
 			image-rendering: pixelated;
 		}
 
 		select, button {
-			border: 1px solid var(--border);
+			padding: 3px 7px;
 			font: inherit;
 			color: inherit;
 			background: var(--bg);
-		}
-		button {
+			transition: background-color 0.15s, border-color 0.15s;
 			cursor: pointer;
 		}
+		select {
+			border: none;
+			border-bottom: 1px solid #404040;
+		}
+		select:hover, select:focus {
+			border-bottom: 1px solid #565656;
+			background: #282828;
+
+		}
+		button {
+			border: 1px solid var(--border);
+			border-radius: 3px;
+		}
 		button:hover {
-			border-color: var(--fg2);
+			border-color: var(--accent);
 		}
 		input[type="color"] {
 			border: 1px solid var(--border);
+		}
+		input[type="checkbox"] {
+			-webkit-appearance: none;
+			width: 42px;
+			/* margin: 0;
+			margin-top: 6px; */
+			cursor: pointer;
+			background: #303030;
+			border-radius: 99px;
+			padding: 2px;
+		}
+		input[type="checkbox"]::after {
+			content: '.';
+			display: block;
+			background: #9c8491;
+			color: transparent;
+			width: 18px;
+			height: 18px;
+			border-radius: 99px;
+			transition: background-color 0.2s, transform 0.2s;
+		}
+		input[type="checkbox"]:checked:after {
+			background: var(--accent);
+			transform: translate(19px, 0);
 		}
 		button.link {
 			font: inherit;
@@ -145,15 +195,35 @@
 			background: rgba(0, 0, 0, 0.8);
 			width: 100%;
 			height: 100%;
-			padding: 20px 10px;
+			padding: 50px 10px;
 		}
 		.popup > * {
 			max-width: 700px;
 			margin: auto;
 		}
-
+		
 		.recording {
 			outline: 1px solid var(--recording);
+		}
+
+		#image-drop-preview {
+			image-rendering: -moz-crisp-edges;
+			image-rendering: pixelated;
+			margin: 0 auto 16px;
+			width: 100%;
+			max-height: 256px;
+			object-fit: contain;
+		}
+
+		.lil-btn {
+			border: 2px solid var(--accent);
+			padding: 5px 10px;
+			margin: 10px 0 0;
+			border-radius: 6px;
+			cursor: pointer;
+		}
+		.lil-btn:hover {
+			background: #0077ff40;
 		}
 
 		@media (max-width: 699px) {
@@ -164,10 +234,11 @@
 
 		@media (min-width: 700px) {
 			#info, footer {
-				max-width: 580px;
+				max-width: 620px;
 			}
 			#info {
 				display: flex;
+				align-items: flex-start;
 			}
 			#info-details {
 				order: 1;
@@ -231,10 +302,14 @@
 					<label>
 						Wireframe
 						<input id="input-wireframe" type="checkbox">
-					</label>
-					<label>
-						Color
 						<input id="input-wireframe-color" type="color" value="#ffffff">
+					</label>
+				</div>
+				<div>
+					<label>
+						Background
+						<input id="input-background-color-enabled" type="checkbox">
+						<input id="input-background-color" type="color" value="#000000">
 					</label>
 				</div>
 				<div>
@@ -243,6 +318,21 @@
 						<input id="input-fov" type="range" min="1" max="179" step="1" value="30">
 						<output></output>
 					</label>
+				</div>
+				<div id="hd-controls" hidden>
+					<div>
+						<label>
+							HD Shading Steps
+							<input id="input-hd-steps" type="range" min="1" max="256" step="1" value="3">
+							<output></output>
+						</label>
+					</div>
+					<div>
+						<label>
+							HD Shading Color
+							<input id="input-hd-ambient" type="color" value="#303030">
+						</label>
+					</div>
 				</div>
 				<div>
 					<label>
@@ -259,13 +349,16 @@
 			</div>
 			<ul id="stats"></ul>
 		</div>
-		<canvas id="texture" width="128" height="120" aria-label="picoCAD current model texture"></canvas>
+		<div id="info-textures">
+			<canvas id="texture" width="128" height="120" aria-label="picoCAD current model texture"></canvas>
+			<img id="texture-hd" hidden>
+		</div>
 	</div>
 	<footer>
 		<ul>
 			<li><a href="https://github.com/lucatronica/picocad-web-viewer">GitHub</a></li>
 			<li><a href="https://johanpeitz.itch.io/picocad">picoCAD</a></li>
-			<li><button class="link" id="btn-show-controls">Controls</button></li>
+			<li><button class="link" id="btn-show-controls">Help</button></li>
 		</ul>
 	</footer>
 	<div class="popup" id="popup-controls" hidden>
@@ -281,6 +374,8 @@
 			<hr>
 			<p>GIFs can be recorded using <kbd>G</kbd> or the "Record GIF" button. When in turntable mode, the recording will automatically stop after a single cycle. The maximum length is 30 seconds.</p>
 			<hr>
+			<p>Drop an image onto the page to provide a custom <a href="https://github.com/lucatronica/picocad-web-viewer#light-maps">light-map</a> or texture.</p>
+			<hr>
 			<p>Other shortcuts:</p>
 			<ul>
 				<li><kbd>T</kbd> to toggle turntable mode</li>
@@ -289,6 +384,10 @@
 				<li><kbd>M</kbd> to toggle render mode</li>
 				<li><kbd>/</kbd> load example model</li>
 			</ul>
+		</div>
+	</div>
+	<div class="popup" id="popup-image-options" hidden>
+		<div>
 		</div>
 	</div>
 	<script src="index.js"></script>

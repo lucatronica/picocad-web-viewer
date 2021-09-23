@@ -1,23 +1,29 @@
 import PicoCADViewer from "../src/index";
-import { PicoCADModel } from "../src/model";
 import { urlCompressModel, urlDecompressModel } from "./model-compression";
 import { GIFEncoder } from "./gifenc";
 import { PICO_COLORS } from "../src/pico";
 
 // Get elements
 const texCanvas = /** @type {HTMLCanvasElement} */(document.getElementById("texture"));
+const texHDImage = /** @type {HTMLImageElement} */(document.getElementById("texture-hd"));
 const viewportCanvas = /** @type {HTMLCanvasElement} */(document.getElementById("viewport"));
 const inputResolution = /** @type {HTMLSelectElement} */(document.getElementById("input-resolution"));
 const inputAutoTurn = /** @type {HTMLInputElement} */(document.getElementById("input-auto-turn"));
 const inputWireframe = /** @type {HTMLInputElement} */(document.getElementById("input-wireframe"));
 const inputWireframeColor = /** @type {HTMLInputElement} */(document.getElementById("input-wireframe-color"));
 const inputRenderMode = /** @type {HTMLSelectElement} */(document.getElementById("input-render-mode"));
+const inputBackgroundColor = /** @type {HTMLInputElement} */(document.getElementById("input-background-color"));
+const inputBackgroundColorEnabled = /** @type {HTMLInputElement} */(document.getElementById("input-background-color-enabled"));
 const inputShading = /** @type {HTMLInputElement} */(document.getElementById("input-shading"));
 const inputFOV = /** @type {HTMLInputElement} */(document.getElementById("input-fov"));
+const inputHDContainer = /** @type {HTMLElement} */(document.getElementById("hd-controls"));
+const inputHDSteps = /** @type {HTMLInputElement} */(document.getElementById("input-hd-steps"));
+const inputHDAmbient = /** @type {HTMLInputElement} */(document.getElementById("input-hd-ambient"));
 const btnShowControls = /** @type {HTMLButtonElement} */(document.getElementById("btn-show-controls"));
 const inputGifFps = /** @type {HTMLInputElement} */(document.getElementById("input-gif-fps"));
 const btnRecordGIF = /** @type {HTMLButtonElement} */(document.getElementById("btn-record-gif"));
-const popupControls = document.getElementById("popup-controls")
+const popupControls = document.getElementById("popup-controls");
+const popupImageOptions = document.getElementById("popup-image-options");
 const statsTable = document.getElementById("stats");
 
 // Create viewer
@@ -55,7 +61,12 @@ async function loadModel(source, saveToURL=true) {
 	cameraRadius = model.zoomLevel;
 
 	// Draw texture.
-	texCanvasCtx.putImageData(pcv.modelTexture, 0, 0);
+	texCanvas.hidden = false;
+	texHDImage.hidden = true;
+	texCanvasCtx.putImageData(pcv.getModelTexture(), 0, 0);
+
+	// Reset custom state.
+	pcv.removeHDTexture();
 
 	// Show stats
 	const faceCount = model.objects.reduce((acc, obj) => acc + obj.faces.length, 0);
@@ -92,6 +103,136 @@ function loadExample(saveToURL=true) {
 }
 
 
+// Palette loading
+
+let hdImageObjectURL = null;
+
+/**
+ * @param {File} file
+ */
+function loadImage(file) {
+	if (hdImageObjectURL != null) {
+		URL.revokeObjectURL(hdImageObjectURL);
+	}
+
+	hdImageObjectURL = URL.createObjectURL(file);
+
+	const img = new Image();
+	img.onload = () => {
+		// Get ImageData.
+		const canvas = document.createElement("canvas");
+		canvas.id = "image-drop-preview";
+		canvas.width = img.naturalWidth;
+		canvas.height = img.naturalHeight;
+		const ctx = canvas.getContext("2d");
+		ctx.drawImage(img, 0, 0);
+		const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+		// Check texture info.
+		const isPico8 = isPico8Texture(imageData);
+		const isLightMap = imageData.width === 32;
+
+		// Get actions we can make.
+		/** @type {[string, number, () => void][]} */
+		const actions = [];
+
+		// Light map action
+		if (isLightMap) {
+			actions.push(["Light-map", 0, () => {
+				pcv.setLightMap(imageData);
+				texCanvasCtx.putImageData(pcv.getModelTexture(), 0, 0);
+			},]);
+
+			// These have been hidden for simplicity.
+			// Maybe show in expandable list
+// 			actions.push(["Texture light-map", 1, () => {
+// 				pcv.setTextureLightMap(imageData);
+// 				texCanvasCtx.putImageData(pcv.getModelTexture(), 0, 0);
+// 			},]);
+// 
+// 			actions.push(["Color light-map", 1, () => {
+// 				pcv.setColorLightMap(imageData);
+// 				texCanvasCtx.putImageData(pcv.getModelTexture(), 0, 0);
+// 			},]);
+		}
+
+		// Basic texture action
+		actions.push(["Texture", 0, () => {
+			texCanvas.hidden = true;
+			texHDImage.hidden = false;
+			texHDImage.src = hdImageObjectURL;
+
+			if (isPico8) {
+				// PICO-8 style texture
+				inputHDContainer.hidden = true;
+				pcv.removeHDTexture();
+				pcv.setIndexTexture(imageData);
+			} else {
+				// HD Texture
+				inputHDContainer.hidden = false;
+				pcv.setHDTexture(imageData);
+			}
+		}]);
+
+		// If just one action, execute it right away.
+		if (actions.length === 1) {
+			actions[0][2]();
+			return;
+		}
+
+		// Show actions in popup.
+		popupImageOptions.hidden = false;
+		const el = popupImageOptions.firstElementChild;
+		el.innerHTML = "";
+
+		el.append(
+			canvas,
+			h("p", {}, "How should this image be used?"),
+		);
+
+		for (const [label, ident, callback] of actions) {
+			const btn = h("div", {class: "lil-btn"}, label);
+			btn.style.marginLeft = `${ident * 30}px`;
+			btn.onclick = () => {
+				callback();
+				popupImageOptions.hidden = true;
+			};
+			el.append(btn);
+		}
+	};
+
+	img.src = hdImageObjectURL;
+}
+
+
+/**
+ * @param {number} r
+ * @param {number} g
+ * @param {number} b
+ */
+function rgbToInt(r, g, b) {
+	return 0xff000000 | (b << 16) | (g << 8) | r;
+}
+
+/**
+ * @param {ImageData} imageData 
+ */
+function isPico8Texture(imageData) {
+	const colors = new Set(PICO_COLORS.map(([r, g, b]) => rgbToInt(r, g, b)));
+
+	const ints = new Int32Array(imageData.data.buffer);
+
+	for (let i = 0, n = ints.length; i < n; i++) {
+		const int = ints[i];
+		if (!colors.has(int)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
 // Extra model loading steps + stats
 
 const texCanvasCtx = texCanvas.getContext("2d");
@@ -99,12 +240,13 @@ const texCanvasCtx = texCanvas.getContext("2d");
 
 // Popups
 
-document.querySelectorAll(".popup").forEach(popup => {
-	popup.addEventListener("click", () => {
-		popupControls.hidden = !popupControls.hidden;
+document.querySelectorAll(".popup").forEach(/** @type {(el: HTMLElement) => void} */(popup) => {
+	popup.addEventListener("click", (event) => {
+		if (event.target === popup) {
+			popup.hidden = !popup.hidden;
+		}
 	});
 });
-
 
 btnShowControls.onclick = () => {
 	popupControls.hidden = !popupControls.hidden;
@@ -117,11 +259,11 @@ popupControls.querySelectorAll("kbd").forEach(kbd => {
 
 // GIF recording
 
-/** @type {import("./gifenc").GIFPalette} */
-const gifPalette = PICO_COLORS.slice();
 const GIF_MAX_LEN = 30; // seconds
 const gifRecorder = new GIFEncoder();
 
+/** @type {import("./gifenc").GIFPalette} */
+let gifPalette = [];
 let gifDelay = 0.02;
 let gifRecording = false;
 let gifTime = 0;
@@ -156,6 +298,8 @@ function stopRecordingGif() {
 
 	// Render GIF
 	const res = pcv.getResolution();
+	gifPalette = pcv.getPalette().slice();
+
 	console.log(gifFrames.length);
 
 	for (let i = 0; i < gifFrames.length; i++) {
@@ -223,13 +367,16 @@ function keyPressed(key) {
 		loadExample();
 	} else if (key === "g") {
 		toggleGifRecording();
+	} else if (key === "pause") {
+		pcv.stopDrawLoop();
+		viewportCanvas.style.opacity = "0.5";
 	}
 }
 
 const keys = Object.create(null);
 
 window.onkeydown = event => {
-	if (!event.ctrlKey && !event.metaKey) {
+	if (event.target === document.body && !event.ctrlKey && !event.metaKey) {
 		event.preventDefault();
 		const key = event.key.toLowerCase();
 		keys[key] = true;
@@ -246,6 +393,8 @@ window.onkeyup = event => {
 
 viewportCanvas.ondblclick = () => {
 	if (pcv.loaded) {
+		/** @type {HTMLElement} */( document.activeElement )?.blur();
+
 		viewportCanvas.requestPointerLock();
 	}
 };
@@ -413,12 +562,15 @@ const inputAutoTurnHandler = inputHandler(inputAutoTurn, () => {
 });
 
 inputHandler(inputWireframeColor, (value) => {
-	pcv.wireframeColor = [
-		value.slice(1, 3),
-		value.slice(3, 5),
-		value.slice(5, 7),
-	].map(s => parseInt(s, 16) / 255);
+	pcv.wireframeColor = hexToRGB(value);
 });
+
+inputHandler(inputBackgroundColorEnabled, updateCustomBackground);
+inputHandler(inputBackgroundColor, updateCustomBackground);
+
+function updateCustomBackground() {
+	pcv.backgroundColor = inputBackgroundColorEnabled.checked ? hexToRGB(inputBackgroundColor.value) : null;
+}
 
 const inputRenderModeHandler = inputHandler(inputRenderMode, value => {
 	pcv.renderMode = /** @type {import("../src/index").PicoCADRenderMode} */(value);
@@ -426,6 +578,15 @@ const inputRenderModeHandler = inputHandler(inputRenderMode, value => {
 
 const inputShadingHandler = inputHandler(inputShading, () => {
 	pcv.shading = inputShading.checked;
+});
+
+const inputHDStepsHandler = inputHandler(inputHDSteps, () => {
+	pcv.hdOptions.shadingSteps = inputHDSteps.valueAsNumber;
+	inputHDSteps.nextElementSibling.textContent = inputHDSteps.value;
+});
+
+const inputHDAmbientHandler = inputHandler(inputHDAmbient, (value) => {
+	pcv.hdOptions.shadingColor = hexToRGB(value);
 });
 
 const inputGifFpsHandler = inputHandler(inputGifFps, value => {
@@ -553,22 +714,36 @@ window.addEventListener("drop", (event) => {
 
 	const file = event.dataTransfer.files[0];
 	if (file != null) {
-		loadModel(file);
+		handleFile(file);
 	}
 });
 
 // Handling pasting.
 document.body.addEventListener("paste", (event) => {
 	const s = event.clipboardData.getData("text/plain");
-	if (s != null) {
+	if (s != null && s.length > 0) {
 		loadModel(s);
 	} else {
 		const file = event.clipboardData.files[0];
 		if (file != null) {
-			loadModel(file);
+			handleFile(file);
 		}
 	}
 });
+
+// File handler
+/**
+ * @param {File} file 
+ */
+function handleFile(file) {
+	const i = file.name.lastIndexOf(".");
+	const ext = i < 0 ? "" : file.name.slice(i + 1).toLowerCase();
+	if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "bmp" || ext === "gif") {
+		loadImage(file);
+	} else {
+		loadModel(file);
+	}
+}
 
 /**
  * @param {number} a 
@@ -580,12 +755,12 @@ function clamp(a, b, x) {
 }
 
 /**
- * @param {string|Element} tag 
+ * @param {string|HTMLElement} tag 
  * @param {*} attributes 
  * @param  {...any} nodes 
  */
 function h(tag, attributes, ...nodes) {
-	tag = tag instanceof Element ? tag : document.createElement(tag);
+	tag = tag instanceof HTMLElement ? tag : document.createElement(tag);
 	if (attributes != null) {
 		for (const k in attributes) {
 			tag.setAttribute(k, attributes[k]);
@@ -626,6 +801,18 @@ function inputHandler(input, onchange) {
 			listener();
 		};
 	}
+}
+
+/**
+ * @param {string} s
+ * @returns {number[]}
+ */
+function hexToRGB(s) {
+	return [
+		s.slice(1, 3),
+		s.slice(3, 5),
+		s.slice(5, 7),
+	].map(s => parseInt(s, 16) / 255);;
 }
 
 // Load starting model.
