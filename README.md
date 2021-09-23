@@ -24,7 +24,9 @@ Texture ![Default picoCAD texture light-map](default_texture_lightmap.png)
 
 Color ![Default picoCAD color light-map](default_color_lightmap.png)
 
-Note the GIF export feature will break when using custom light-maps with more than 16 colors.
+[See here for examples of custom light-maps](https://luca.games/picocad/light-maps/).
+
+> Note the GIF export feature will break when using custom light-maps with more than 16 colors.
 
 ## Usage
 
