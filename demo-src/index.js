@@ -14,6 +14,7 @@ const inputWireframeColor = /** @type {HTMLInputElement} */(document.getElementB
 const inputRenderMode = /** @type {HTMLSelectElement} */(document.getElementById("input-render-mode"));
 const inputBackgroundColor = /** @type {HTMLInputElement} */(document.getElementById("input-background-color"));
 const inputBackgroundColorEnabled = /** @type {HTMLInputElement} */(document.getElementById("input-background-color-enabled"));
+const inputBackgroundTransparent = /** @type {HTMLInputElement} */(document.getElementById("input-background-transparent"));
 const inputShading = /** @type {HTMLInputElement} */(document.getElementById("input-shading"));
 const inputFOV = /** @type {HTMLInputElement} */(document.getElementById("input-fov"));
 const inputHDContainer = /** @type {HTMLElement} */(document.getElementById("hd-controls"));
@@ -298,14 +299,24 @@ function stopRecordingGif() {
 
 	// Render GIF
 	const res = pcv.getResolution();
+
+	// Get the palette
 	gifPalette = pcv.getPalette().slice();
 
-	console.log(gifFrames.length);
+	let transparentIndex = -1;
+
+	// Handle transparent background
+	if (pcv.backgroundColor != null && pcv.backgroundColor[3] < 1) {
+		// A bit hacky, we know that the background index is at the end.
+		transparentIndex = gifPalette.length - 1;
+	}
 
 	for (let i = 0; i < gifFrames.length; i++) {
 		gifRecorder.writeFrame(gifFrames[i], res.width * res.scale, res.height * res.scale, {
 			palette: i === 0 ? gifPalette : null,
 			delay: gifDelay * 1000,
+			transparent: transparentIndex >= 0,
+			transparentIndex: transparentIndex,
 		});
 	}
 
@@ -567,9 +578,14 @@ inputHandler(inputWireframeColor, (value) => {
 
 inputHandler(inputBackgroundColorEnabled, updateCustomBackground);
 inputHandler(inputBackgroundColor, updateCustomBackground);
+inputHandler(inputBackgroundTransparent, updateCustomBackground);
 
 function updateCustomBackground() {
-	pcv.backgroundColor = inputBackgroundColorEnabled.checked ? hexToRGB(inputBackgroundColor.value) : null;
+	if (inputBackgroundTransparent.checked) {
+		pcv.backgroundColor = [0, 0, 0, 0];
+	} else {
+		pcv.backgroundColor = inputBackgroundColorEnabled.checked ? hexToRGB(inputBackgroundColor.value) : null;
+	}
 }
 
 const inputRenderModeHandler = inputHandler(inputRenderMode, value => {

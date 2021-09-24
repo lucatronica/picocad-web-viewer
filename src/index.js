@@ -8,7 +8,7 @@ import { createColorLightMap, createTextureLightMap } from "./lighting";
 import { isSafari } from "./environment";
 import { PicoCADModel } from "./model";
 import { parsePicoCADModel } from "./model-parser";
-import { rgbToInt } from "./color";
+import { rgb01to255, rgbToInt } from "./color";
 
 export default class PicoCADViewer {
 	/**
@@ -64,7 +64,7 @@ export default class PicoCADViewer {
 		/** The style draw the model. */
 		this.renderMode = options.renderMode ?? "texture";
 		/**
-		 * A custom background color. As [R, G, B] (each component [0, 1]).
+		 * A custom background color. As [R, G, B] or [R, G, B, A] (each component [0, 1]).
 		 * @type {number[]}
 		 */
 		this.backgroundColor = null;
@@ -236,15 +236,28 @@ export default class PicoCADViewer {
 	}
 
 	/**
-	 * The main 16 RGB255 colors used in the current light-map.
+	 * The RGBA255 colors used in the current render.
 	 * 
+	 * The first 16 colors will always be the PICO-8 indices.
 	 * For the default light-map this just returns the PICO-8 colors.
+	 * 
+	 * If a custom background is set, that will be included at the end of the array.
 	 * 
 	 * Note a custom light-map may contain additional colors not in the returned array, due to shading and dithering.
 	 * @returns {number[][]}
 	 */
 	getPalette() {
-		return this._lightMapColors;
+		// Convert existing palette to RGBA
+		let colors = this._lightMapColors.map(color => [color[0], color[1], color[2], 255]);
+
+		// Add custom background
+		if (this.backgroundColor != null) {
+			const bg = rgb01to255(this.backgroundColor);
+			if (bg.length != 4) bg.push(255);
+			colors.push(bg);
+		}
+
+		return colors;
 	}
 
 	/**
@@ -570,7 +583,7 @@ export default class PicoCADViewer {
 			const bgColor = this._lightMapColors[this.model.backgroundIndex];
 			gl.clearColor(bgColor[0] / 255, bgColor[1] / 255, bgColor[2] / 255, 1);
 		} else {
-			gl.clearColor(this.backgroundColor[0], this.backgroundColor[1], this.backgroundColor[2], 1);
+			gl.clearColor(this.backgroundColor[0], this.backgroundColor[1], this.backgroundColor[2], this.backgroundColor[3] ?? 1);
 		}
 
 		gl.clearDepth(1.0); 
@@ -973,7 +986,7 @@ export default class PicoCADViewer {
 		}
 
 		// Create color -> index mapping.
-		const paletteColors = new Map(this._lightMapColors.map(([r, g, b], i) => [ rgbToInt(r, g, b), i ]));
+		const paletteColors = new Map(this.getPalette().map((rgb, i) => [ rgbToInt(rgb), i ]));
 
 		// Convert.
 		// Note the WebGL buffer is top to bottom.
