@@ -150,11 +150,6 @@ function loadImage(file) {
 // 				pcv.setTextureLightMap(imageData);
 // 				texCanvasCtx.putImageData(pcv.getModelTexture(), 0, 0);
 // 			},]);
-// 
-// 			actions.push(["Color light-map", 1, () => {
-// 				pcv.setColorLightMap(imageData);
-// 				texCanvasCtx.putImageData(pcv.getModelTexture(), 0, 0);
-// 			},]);
 		}
 
 		// Basic texture action

@@ -4,7 +4,7 @@ import { prepareModelForRendering } from "./model-gl-loader";
 import { Pass, WirePass } from "./pass";
 import { PICO_COLORS } from "./pico";
 import { ShaderProgram } from "./shader-program";
-import { createColorLightMap, createTextureLightMap } from "./lighting";
+import { createLightMap } from "./lighting";
 import { isSafari } from "./environment";
 import { PicoCADModel } from "./model";
 import { parsePicoCADModel } from "./model-parser";
@@ -225,12 +225,9 @@ export default class PicoCADViewer {
 	 */
 	resetLightMap() {
 		if (this._lightMapTex != null) this.gl.deleteTexture(this._lightMapTex);
-		if (this._colorLightMapTex != null) this.gl.deleteTexture(this._colorLightMapTex);
 
 		/** @private */
-		this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, createTextureLightMap());
-		/** @private */
-		this._colorLightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, createColorLightMap());
+		this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, createLightMap());
 		/** @type {number[][]} @private */
 		this._lightMapColors = PICO_COLORS.slice();
 	}
@@ -287,11 +284,10 @@ export default class PicoCADViewer {
 	 */
 	setLightMap(imageData) {
 		if (this._lightMapTex != null) this.gl.deleteTexture(this._lightMapTex);
-		if (this._colorLightMapTex != null) this.gl.deleteTexture(this._colorLightMapTex);
 
 		this._lightMapColors = this._getLightMapColors(imageData);
 
-		this._colorLightMapTex = this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, imageData);
+		this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, imageData);
 	}
 
 	/**
@@ -307,13 +303,11 @@ export default class PicoCADViewer {
 	}
 	
 	/**
-	 * Override the default color light-map.
 	 * @param {ImageData} imageData
+	 * @deprecated
 	 */
 	setColorLightMap(imageData) {
-		if (this._colorLightMapTex != null) this.gl.deleteTexture(this._colorLightMapTex);
-
-		this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, imageData);
+		throw TypeError("setColorLightMap() is depreciated");
 	}
 
 	/**
@@ -663,7 +657,7 @@ export default class PicoCADViewer {
 
 					// Light-map texture
 					gl.activeTexture(gl.TEXTURE1);
-					gl.bindTexture(gl.TEXTURE_2D, useColor ? this._colorLightMapTex : this._lightMapTex);
+					gl.bindTexture(gl.TEXTURE_2D, this._lightMapTex);
 					gl.uniform1i(programInfo.locations.lightMap, 1);
 				} else if (programInfo === this._programTexture) {
 					// Index texture
@@ -673,12 +667,14 @@ export default class PicoCADViewer {
 
 					// Light-map texture
 					gl.activeTexture(gl.TEXTURE1);
-					gl.bindTexture(gl.TEXTURE_2D, useColor ? this._colorLightMapTex : this._lightMapTex);
+					gl.bindTexture(gl.TEXTURE_2D, this._lightMapTex);
 					gl.uniform1i(programInfo.locations.lightMap, 1);
 
 					// Light map curve
-					gl.uniform1f(programInfo.locations.lightMapOffset, useColor ? -0.316326530612245 : -0.3571428571428572);
-					gl.uniform1f(programInfo.locations.lightMapGradient, useColor ? 1.63265306122449 : 2.857142857142857);
+					// gl.uniform1f(programInfo.locations.lightMapOffset, useColor ? -0.316326530612245 : -0.3571428571428572);
+					// gl.uniform1f(programInfo.locations.lightMapGradient, useColor ? 1.63265306122449 : 2.857142857142857);
+					gl.uniform1f(programInfo.locations.lightMapOffset, -0.3571428571428572);
+					gl.uniform1f(programInfo.locations.lightMapGradient, 2.857142857142857);
 
 					// Light direction
 					gl.uniform3f(programInfo.locations.lightDir, lightVector.x, lightVector.y, lightVector.z);
@@ -1042,10 +1038,8 @@ export default class PicoCADViewer {
 		this._passes = [];
 
 		gl.deleteTexture(this._lightMapTex);
-		gl.deleteTexture(this._colorLightMapTex);
 		gl.deleteTexture(this._indexTex);
 		this._lightMapTex = null;
-		this._colorLightMapTex = null;
 		this._indexTex = null;
 
 		this._programTexture.program.free();
