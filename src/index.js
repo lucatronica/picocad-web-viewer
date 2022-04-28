@@ -291,6 +291,13 @@ export default class PicoCADViewer {
 		// Convert existing palette to RGBA
 		let colors = this._lightMapColors.map(color => [color[0], color[1], color[2], 255]);
 
+		// Add custom outline.
+		if (this.outlineSize >= 1) {
+			const outline = rgb01to255(this.outlineColor);
+			if (outline.length != 4) outline.push(255);
+			colors.push(outline);
+		}
+
 		// Add custom background
 		if (this.backgroundColor != null) {
 			const bg = rgb01to255(this.backgroundColor);
