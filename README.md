@@ -7,7 +7,7 @@
 
 Color palettes and shading can be customized using light-maps.
 
-![Enlarged default picoCAD light-map](default_texture_lightmap_large.png)
+![Enlarged default picoCAD light-map](default_lightmap_large.png)
 
 A light-map must be 32 pixels wide, but can be any height.
 
@@ -20,9 +20,7 @@ Each 2-pixel-column specifies the shading for one color.
 
 The default picoCAD light-maps are a good starting point for customization:
 
-Texture ![Default picoCAD texture light-map](default_texture_lightmap.png)
-
-Color ![Default picoCAD color light-map](default_color_lightmap.png)
+![Default picoCAD light-map](default_lightmap.png)
 
 [See here for examples of custom light-maps](https://luca.games/picocad/light-maps/).
 
