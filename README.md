@@ -18,9 +18,7 @@ Each 2-pixel-column specifies the shading for one color.
 	* To have no dithering make both colors the same.
 * The order of the columns correspond to the PICO-8 color indices.
 
-The default picoCAD light-maps are a good starting point for customization:
-
-![Default picoCAD light-map](default_lightmap.png)
+The default picoCAD light-map is a good starting point for customization: ![Default picoCAD light-map](default_lightmap.png)
 
 [See here for examples of custom light-maps](https://luca.games/picocad/light-maps/).
 
