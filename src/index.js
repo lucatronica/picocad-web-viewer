@@ -5,7 +5,6 @@ import { Pass, WirePass } from "./pass";
 import { PICO_COLORS } from "./pico";
 import { ShaderProgram } from "./shader-program";
 import { createLightMap } from "./lighting";
-import { isSafari } from "./environment";
 import { PicoCADModel } from "./model";
 import { parsePicoCADModel } from "./model-parser";
 import { rgb01to255, rgbToInt } from "./color";
@@ -36,6 +35,9 @@ export default class PicoCADViewer {
 			antialias: false,
 			preserveDrawingBuffer: options.preserveDrawingBuffer ?? false,
 		});
+
+		gl.enable(gl.BLEND);
+		gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 		
 		/** Camera position in scene. */
 		this.cameraPosition = {
@@ -68,6 +70,18 @@ export default class PicoCADViewer {
 		 * @type {number[]}
 		 */
 		this.backgroundColor = null;
+		/**
+		 * The outline color. As [R, G, B] or [R, G, B, A] (each component [0, 1]).
+		 * @type {number[]}
+		 */
+		this.outlineColor = [0, 0, 0, 1];
+		/**
+		 * The outline size in pixels.
+		 * 
+		 * An additional draw call is needed for each pixel increment.
+		 * @type {number}
+		 */
+		this.outlineSize = 0;
 		/** If the wireframe should be drawn. */
 		this.drawWireframe = options.drawWireframe ?? false;
 		/** If the wireframe should be drawn "through" the model. */
@@ -102,40 +116,34 @@ export default class PicoCADViewer {
 		/** @private */
 		this._programWireframe = createWireframeProgram(gl);
 
-		// Handle pixel scaling.
-		if (isSafari) {
-			// Safari does not support `image-rendering: pixelated` on a WebGL canvas.
-			// Need to render to a texture, then draw that scaled up texture to the screen.
-			/** @private */
-			this._programFramebuffer = createFramebufferProgram(gl);
+		// We draw the scene to a framebuffer to support pixel scaling on all platforms, and to enable post-processing.
+		// We use a second framebuffer + texture to enable multiple post-processing filters (ping-pong between the two).
+		/** @private */
+		this._programFramebuffer = createFramebufferProgram(gl);
+		
+		/** @private */
+		this._programOutline = createOutlineProgram(gl);
 
-			/** @private */
-			this._depthBuffer = gl.createRenderbuffer();
+		/** @private */
+		this._depthBuffer = gl.createRenderbuffer();
 
-			/** @private */
-			this._frameBuffer = gl.createFramebuffer();
+		/** @private */
+		this._frameBuffer = gl.createFramebuffer();
+		
+		/** @private */
+		this._frameBuffer2 = gl.createFramebuffer();
 
-			/** @private */
-			this._screenQuads = gl.createBuffer();
-			gl.bindBuffer(gl.ARRAY_BUFFER, this._screenQuads);
-			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-				-1, -1,
-				+1, -1,
-				-1, +1,
-				-1, +1,
-				+1, -1,
-				+1, +1,
-			]), gl.STATIC_DRAW);
-		} else {
-			const className = "pico-cad-viewport"
-
-			this.canvas.classList.add(className);
-
-			/** @private */
-			this._style = document.createElement("style");
-			this._style.textContent = `.${className} { image-rendering: -moz-crisp-edges; image-rendering: pixelated; }`;
-			document.head.append(this._style);
-		}
+		/** @private */
+		this._screenQuads = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, this._screenQuads);
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+			-1, -1,
+			+1, -1,
+			-1, +1,
+			-1, +1,
+			+1, -1,
+			+1, +1,
+		]), gl.STATIC_DRAW);
 
 		// Set resolution. Internally this will also setup Safari framebuffers.
 		const res = options.resolution;
@@ -169,30 +177,35 @@ export default class PicoCADViewer {
 		const gl = this.gl;
 		const canvas = this.canvas;
 
-		if (isSafari) {
-			canvas.width = widthScreen;
-			canvas.height = heightScreen;
+		canvas.width = widthScreen;
+		canvas.height = heightScreen;
 
-			// Update framebuffer resolution.
-			/** @private */
-			this._frameBufferTex = this._createTexture(this._frameBufferTex, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, null, width, height);
+		// Update framebuffer resolution.
+		/** @private */
+		this._frameBufferTex = this._createTexture(this._frameBufferTex, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, null, width, height);
+		this._frameBufferTex2 = this._createTexture(this._frameBufferTex2, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, null, width, height);
 
-			gl.bindRenderbuffer(gl.RENDERBUFFER, this._depthBuffer);
-			gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, width, height);
+		gl.bindRenderbuffer(gl.RENDERBUFFER, this._depthBuffer);
+		gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, width, height);
 
-			gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
-			gl.framebufferTexture2D(
-				gl.FRAMEBUFFER,
-				gl.COLOR_ATTACHMENT0,
-				gl.TEXTURE_2D,
-				this._frameBufferTex,
-				0,
-			);
-			gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this._depthBuffer);
-		} else {
-			canvas.width = width;
-			canvas.height = height;
-		}
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
+		gl.framebufferTexture2D(
+			gl.FRAMEBUFFER,
+			gl.COLOR_ATTACHMENT0,
+			gl.TEXTURE_2D,
+			this._frameBufferTex,
+			0,
+		);
+		gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this._depthBuffer);
+		
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer2);
+		gl.framebufferTexture2D(
+			gl.FRAMEBUFFER,
+			gl.COLOR_ATTACHMENT0,
+			gl.TEXTURE_2D,
+			this._frameBufferTex2,
+			0,
+		);
 
 		canvas.style.width = `${widthScreen}px`;
 		canvas.style.height = `${heightScreen}px`;
@@ -564,22 +577,12 @@ export default class PicoCADViewer {
 		const canvas = this.canvas;
 
 		// Set viewport and framebuffer.
-		if (isSafari) {
-			gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
 
-			gl.viewport(0, 0, this._resolution[0], this._resolution[1]);
-		} else {
-			gl.viewport(0, 0, canvas.width, canvas.height);
-		}
+		gl.viewport(0, 0, this._resolution[0], this._resolution[1]);
 
 		// Clear screen.
-		if (this.backgroundColor == null) {
-			const bgColor = this._lightMapColors[this.model.backgroundIndex];
-			gl.clearColor(bgColor[0] / 255, bgColor[1] / 255, bgColor[2] / 255, 1);
-		} else {
-			gl.clearColor(this.backgroundColor[0], this.backgroundColor[1], this.backgroundColor[2], this.backgroundColor[3] ?? 1);
-		}
-
+		gl.clearColor(0, 0, 0, 0);
 		gl.clearDepth(1.0); 
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
@@ -778,31 +781,93 @@ export default class PicoCADViewer {
 			gl.drawArrays(gl.LINES, 0, this._wireframe.vertexCount);
 		}
 
-		// Render framebuffer to canvas.
-		if (isSafari) {
-			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		// Postprocessing.
+		let currFrameBufferTex = this._frameBufferTex;
+		let outlineIterations = this.outlineSize;
 
-			gl.viewport(0, 0, canvas.width, canvas.height);
+		if (outlineIterations > 0) {
+			// If we have any post-processing to do, clear the second framebuffer.
+			gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer2);
+			gl.clear(gl.COLOR_BUFFER_BIT);
+		}
 
-			this._programFramebuffer.program.use();
+		// Outlines.
+		if (outlineIterations > 0) {
+			let outlineProgram = this._programOutline;
 
-			gl.activeTexture(gl.TEXTURE0);
-			gl.bindTexture(gl.TEXTURE_2D, this._frameBufferTex);
-			gl.uniform1i(this._programFramebuffer.locations.mainTex, 0);
+			outlineProgram.program.use();
+
+			gl.uniform2f(outlineProgram.locations.pixel, 1 / this._resolution[0], 1 / this._resolution[1]);
+			
+			gl.uniform4f(outlineProgram.locations.outlineColor, this.outlineColor[0], this.outlineColor[1], this.outlineColor[2], this.outlineColor[3] ?? 1);
 
 			gl.bindBuffer(gl.ARRAY_BUFFER, this._screenQuads);
 			gl.vertexAttribPointer(
-				this._programFramebuffer.program.vertexLocation,
+				outlineProgram.program.vertexLocation,
 				2,
 				gl.FLOAT,
 				false,
 				0,
 				0,
 			);
-			gl.enableVertexAttribArray(this._programFramebuffer.program.vertexLocation);
-
-			gl.drawArrays(gl.TRIANGLES, 0, 6);
+			gl.enableVertexAttribArray(outlineProgram.program.vertexLocation);
+	
+			for (let i = 0; i < outlineIterations; i++) {
+				// Swap target framebuffer.
+				let nextFrameBufferTex;
+				if (currFrameBufferTex === this._frameBufferTex) {
+					gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer2);
+					nextFrameBufferTex = this._frameBufferTex2;
+				} else {
+					gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
+					nextFrameBufferTex = this._frameBufferTex;
+				}
+	
+				// Draw to framebuffer.
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, currFrameBufferTex);
+				gl.uniform1i(outlineProgram.locations.mainTex, 0);
+	
+				gl.drawArrays(gl.TRIANGLES, 0, 6);
+	
+				// Finalize swap.
+				currFrameBufferTex = nextFrameBufferTex;
+			}
 		}
+
+		// Render framebuffer to canvas.
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+		gl.viewport(0, 0, canvas.width, canvas.height);
+
+		if (this.backgroundColor == null) {
+			const bgColor = this._lightMapColors[this.model.backgroundIndex];
+			gl.clearColor(bgColor[0] / 255, bgColor[1] / 255, bgColor[2] / 255, 1);
+		} else {
+			gl.clearColor(this.backgroundColor[0], this.backgroundColor[1], this.backgroundColor[2], this.backgroundColor[3] ?? 1);
+		}
+		gl.clear(gl.COLOR_BUFFER_BIT);
+
+		let program = this._programFramebuffer;
+
+		program.program.use();
+
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, currFrameBufferTex);
+		gl.uniform1i(program.locations.mainTex, 0);
+
+		gl.bindBuffer(gl.ARRAY_BUFFER, this._screenQuads);
+		gl.vertexAttribPointer(
+			program.program.vertexLocation,
+			2,
+			gl.FLOAT,
+			false,
+			0,
+			0,
+		);
+		gl.enableVertexAttribArray(program.program.vertexLocation);
+
+		gl.drawArrays(gl.TRIANGLES, 0, 6);
 	}
 
 	/**
@@ -895,12 +960,12 @@ export default class PicoCADViewer {
 	}
 
 	getDrawCallCount() {
-		let count = 0;
+		let count = 1; // framebuffer -> canvas
 		for (const pass of this._passes) {
 			if (!pass.isEmpty()) count++;
 		}
 		if (this.drawWireframe) count++;
-		if (isSafari) count++;
+		count += this.outlineSize;
 		return count;
 	}
 
@@ -971,18 +1036,17 @@ export default class PicoCADViewer {
 
 		const buffer = new Uint8Array(count * 4);
 		
-		if (isSafari) {
-			gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
-		}
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
 
 		gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, buffer);
 
-		if (isSafari) {
-			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-		}
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
 		// Create color -> index mapping.
 		const paletteColors = new Map(this.getPalette().map((rgb, i) => [ rgbToInt(rgb), i ]));
+
+		// The framebuffer has a transparent background, so add transparent -> background-color mapping.
+		paletteColors.set(0, this.backgroundColor ? 16 : this.model.backgroundIndex);
 
 		// Convert.
 		// Note the WebGL buffer is top to bottom.
@@ -1047,18 +1111,20 @@ export default class PicoCADViewer {
 		this._programTexture = null;
 		this._programWireframe = null;
 
-		if (isSafari) {
-			gl.deleteFramebuffer(this._frameBuffer);
-			gl.deleteTexture(this._frameBufferTex);
-			gl.deleteBuffer(this._screenQuads);
-			gl.deleteRenderbuffer(this._depthBuffer);
-			this._programFramebuffer.program.free();
-			this._frameBuffer = null;
-			this._frameBufferTex = null;
-			this._screenQuads = null;
-			this._depthBuffer = null;
-			this._programFramebuffer = null;
-		}
+		gl.deleteFramebuffer(this._frameBuffer);
+		gl.deleteFramebuffer(this._frameBuffer2);
+		gl.deleteTexture(this._frameBufferTex);
+		gl.deleteTexture(this._frameBufferTex2);
+		gl.deleteBuffer(this._screenQuads);
+		gl.deleteRenderbuffer(this._depthBuffer);
+		this._programFramebuffer.program.free();
+		this._frameBuffer = null;
+		this._frameBuffer2 = null;
+		this._frameBufferTex = null;
+		this._frameBufferTex2 = null;
+		this._screenQuads = null;
+		this._depthBuffer = null;
+		this._programFramebuffer = null;
 	}
 }
 
@@ -1266,6 +1332,51 @@ function createFramebufferProgram(gl) {
 		program: program,
 		locations: {
 			mainTex: program.getUniformLocation("mainTex"),
+		}
+	};
+}
+
+/**
+ * @param {WebGLRenderingContext} gl 
+ */
+function createOutlineProgram(gl) {
+	const program = new ShaderProgram(gl, `
+		attribute vec4 vertex;
+
+		varying highp vec2 v_uv;
+
+		void main() {
+			v_uv = 0.5 + vertex.xy * 0.5;
+			gl_Position = vertex;
+		}
+	`, `
+		varying highp vec2 v_uv;
+		
+		uniform sampler2D mainTex;
+		uniform highp vec2 pixel;
+		uniform lowp vec4 outlineColor;
+
+		void main() {
+			lowp float a = 1.0 - texture2D(mainTex, v_uv).a;
+			lowp float b = texture2D(mainTex, v_uv + vec2(pixel.x, 0.0)).a + texture2D(mainTex, v_uv - vec2(pixel.x, 0.0)).a + texture2D(mainTex, v_uv + vec2(0.0, pixel.y)).a + texture2D(mainTex, v_uv - vec2(0.0, pixel.y)).a;
+			gl_FragColor = mix(
+				mix(
+					texture2D(mainTex, v_uv),
+					vec4(0.0, 0.0, 0.0, 0.0),
+					a
+				),
+				outlineColor,
+				min(1.0, a * b)
+			);
+		}
+	`);
+	
+	return {
+		program: program,
+		locations: {
+			mainTex: program.getUniformLocation("mainTex"),
+			pixel: program.getUniformLocation("pixel"),
+			outlineColor: program.getUniformLocation("outlineColor"),
 		}
 	};
 }

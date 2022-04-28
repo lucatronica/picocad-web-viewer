@@ -22,6 +22,8 @@ const inputHDSteps = /** @type {HTMLInputElement} */(document.getElementById("in
 const inputHDAmbient = /** @type {HTMLInputElement} */(document.getElementById("input-hd-ambient"));
 const btnShowControls = /** @type {HTMLButtonElement} */(document.getElementById("btn-show-controls"));
 const inputGifFps = /** @type {HTMLInputElement} */(document.getElementById("input-gif-fps"));
+const inputOutlineSize = /** @type {HTMLInputElement} */(document.getElementById("input-outline-size"));
+const inputOutlineColor = /** @type {HTMLInputElement} */(document.getElementById("input-outline-color"));
 const btnRecordGIF = /** @type {HTMLButtonElement} */(document.getElementById("btn-record-gif"));
 const popupControls = document.getElementById("popup-controls");
 const popupImageOptions = document.getElementById("popup-image-options");
@@ -74,10 +76,10 @@ async function loadModel(source, saveToURL=true) {
 
 	while (statsTable.lastChild != null) statsTable.lastChild.remove();
 
-	statsTable.append(h("li", {}, pcv.model.name));
+	statsTable.append(h("li", { class: "filename" }, pcv.model.name), h("br"));
 
 	const stats = {
-		"Colors": pcv.getTextureColorCount(),
+		// "Colors": pcv.getTextureColorCount(),
 		"Objects": model.objects.length,
 		"Faces": faceCount,
 	};
@@ -85,7 +87,7 @@ async function loadModel(source, saveToURL=true) {
 	console.log(`${pcv.getTriangleCount()} triangles, ${pcv.getDrawCallCount()} draw calls`);
 
 	for (const [key, value] of Object.entries(stats)) {
-		statsTable.append(h("li", {}, `${key}: ${value}`));
+		statsTable.append(h("li", {}, ` ${key}: ${value}`));
 	}
 
 	// Add compressed model text to URL.
@@ -602,6 +604,14 @@ const inputHDAmbientHandler = inputHandler(inputHDAmbient, (value) => {
 
 const inputGifFpsHandler = inputHandler(inputGifFps, value => {
 	gifDelay = Number(value) / 100;
+});
+
+const inputOutlineSizeHandler = inputHandler(inputOutlineSize, () => {
+	pcv.outlineSize = inputOutlineSize.valueAsNumber;
+});
+
+const inputOutlineColorHandler = inputHandler(inputOutlineColor, () => {
+	pcv.outlineColor = hexToRGB(inputOutlineColor.value);
 });
 
 btnRecordGIF.onclick = () => {

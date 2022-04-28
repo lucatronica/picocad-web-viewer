@@ -74,7 +74,7 @@
 		}
 
 		#info, footer {
-			margin: 0 auto 12px;
+			margin: 0 auto 20px;
 		}
 
 		#info-details {
@@ -126,6 +126,14 @@
 		}
 		button:hover {
 			border-color: var(--accent);
+		}
+		input[type="number"] {
+			padding: 3px 7px;
+			font: inherit;
+			color: inherit;
+			background: none;
+			border: none;
+			border-bottom: 1px solid #404040;
 		}
 		input[type="color"] {
 			border: 1px solid var(--border);
@@ -183,6 +191,13 @@
 
 		#stats {
 			color: var(--fg2);
+		}
+		#stats li {
+			display: inline;
+			padding-left: 0.3em;
+		}
+		.filename {
+			font-weight: bolder;
 		}
 
 		footer {
@@ -311,6 +326,13 @@
 				</div>
 				<div>
 					<label>
+						Outline
+						<input id="input-outline-size" type="number" min="0" max="32" step="1" value="0" style="width: 3.5em;">px
+						<input id="input-outline-color" type="color" value="#000000">
+					</label>
+				</div>
+				<div>
+					<label>
 						Background
 						<input id="input-background-color-enabled" type="checkbox">
 						<input id="input-background-color" type="color" value="#000000">
@@ -355,11 +377,11 @@
 					<button id="btn-record-gif">Record GIF</button>
 				</div>
 			</div>
-			<ul id="stats"></ul>
 		</div>
 		<div id="info-textures">
 			<canvas id="texture" width="128" height="120" aria-label="picoCAD current model texture"></canvas>
 			<img id="texture-hd" hidden>
+			<ul id="stats"></ul>
 		</div>
 	</div>
 	<footer>
