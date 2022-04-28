@@ -7,7 +7,8 @@ import { ShaderProgram } from "./shader-program";
 import { createLightMap } from "./lighting";
 import { PicoCADModel } from "./model";
 import { parsePicoCADModel } from "./model-parser";
-import { rgb01to255, rgbToInt } from "./color";
+import { luma, rgb01to255, rgbToInt } from "./color";
+import { lazyLoadedFontImage } from "./text.js";
 
 export default class PicoCADViewer {
 	/**
@@ -82,6 +83,25 @@ export default class PicoCADViewer {
 		 * @type {number}
 		 */
 		this.outlineSize = 0;
+		/**
+		 * @type {string|null}
+		 * @private
+		 */
+		this._watermarkText = null;
+		/**
+		 * @type {number[]}
+		 * @private
+		 */
+		this._watermarkSize = null;
+		/**
+		 * @private
+		 * @type {WebGLBuffer}
+		 */
+		this._watermarkBuffer = null;
+		/**
+		 * @private
+		 */
+		this._watermarkTriangleCount = 0;
 		/** If the wireframe should be drawn. */
 		this.drawWireframe = options.drawWireframe ?? false;
 		/** If the wireframe should be drawn "through" the model. */
@@ -104,6 +124,8 @@ export default class PicoCADViewer {
 		this._colorIndexTex = this._createTexture(null, this.gl.LUMINANCE, this.gl.LUMINANCE, this.gl.UNSIGNED_BYTE, new Uint8Array([ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]), 16, 1);
 		/** @private @type {WebGLTexture} */
 		this._indexTex = null;
+		/** @private @type {WebGLTexture} */
+		this._fontTex = null;
 		this.resetLightMap();
 		/** @private */
 		this._programTexture = createTextureProgram(gl);
@@ -115,6 +137,8 @@ export default class PicoCADViewer {
 		this._wireframe = null;
 		/** @private */
 		this._programWireframe = createWireframeProgram(gl);
+		/** @private */
+		this._programText = createTextProgram(gl);
 
 		// We draw the scene to a framebuffer to support pixel scaling on all platforms, and to enable post-processing.
 		// We use a second framebuffer + texture to enable multiple post-processing filters (ping-pong between the two).
@@ -132,6 +156,13 @@ export default class PicoCADViewer {
 		
 		/** @private */
 		this._frameBuffer2 = gl.createFramebuffer();
+
+		/**
+		 * The last used framebuffer.
+		 * @private
+		 * @type {WebGLFramebuffer|null}
+		 */
+		this._framebufferCurrent = null;
 
 		/** @private */
 		this._screenQuads = gl.createBuffer();
@@ -275,15 +306,33 @@ export default class PicoCADViewer {
 	 * @private
 	 */
 	_getLightMapColors(imageData) {
+		const data = imageData.data;
 		const colors = Array(16);
+		const set = new Set();
+
+		// First add every 2nd pixel from top row.
 		for (let i = 0; i < 16; i++) {
 			let ti = i * 8;
-			colors[i] = [
-				imageData.data[ti    ],
-				imageData.data[ti + 1],
-				imageData.data[ti + 2],
-			];
+			let r = data[ti    ];
+			let g = data[ti + 1];
+			let b = data[ti + 2];
+			let rgb = [r, g, b];
+			colors[i] = rgb;
+			set.add(r + g * 256 + b * 65536);
 		}
+
+		// Then check all other pixels!
+		for (let i = 0; i < data.length; i += 4) {
+			let r = data[i    ];
+			let g = data[i + 1];
+			let b = data[i + 2];
+			let key = r + g * 256 + b * 65536;
+			if (!set.has(key)) {
+				set.add(key);
+				colors.push([r, g, b]);
+			}
+		}
+
 		return colors;
 	}
 
@@ -301,26 +350,6 @@ export default class PicoCADViewer {
 		this._lightMapColors = this._getLightMapColors(imageData);
 
 		this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, imageData);
-	}
-
-	/**
-	 * Override the default texture light-map.
-	 * @param {ImageData} imageData
-	 */
-	setTextureLightMap(imageData) {
-		if (this._lightMapTex != null) this.gl.deleteTexture(this._lightMapTex);
-
-		this._lightMapColors = this._getLightMapColors(imageData);
-
-		this._lightMapTex = this._createTexture(null, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, imageData);
-	}
-	
-	/**
-	 * @param {ImageData} imageData
-	 * @deprecated
-	 */
-	setColorLightMap(imageData) {
-		throw TypeError("setColorLightMap() is depreciated");
 	}
 
 	/**
@@ -406,6 +435,117 @@ export default class PicoCADViewer {
 		if (this._hdTex != null) {
 			this.gl.deleteTexture(this._hdTex);
 			this._hdTex = null;
+		}
+	}
+	
+	getWatermark() {
+		return this._watermarkText;
+	}
+
+	/**
+	 * Sets a watermark to be displayed in the corner of the GIF.
+	 * @param {string} s
+	 */
+	setWatermark(s) {
+		if (s == null || s.trim().length === 0) {
+			s = null;
+		}
+
+		if (s !== this._watermarkText) {
+			this._watermarkText = s;
+
+			if (s) {
+				/** @type {number[]} */
+				let bytes = [];
+
+				// Iterate code-points and convert to PICO-8 bytes.
+				for (let cs of s) {
+					let byte = 32;
+
+					if (cs.length === 1) {
+						let code = cs.charCodeAt(0);
+
+						if (code >= 65 && code <= 90) {
+							// A-Z -> a-z
+							byte = 97 + (code - 65);
+						} else if (code >= 97 && code <= 122) {
+							// a-z -> A->Z
+							byte = 65 + (code - 97);
+						} else if (code < 128) {
+							byte = code;
+						}
+					} else if (cs === "♥") {
+						byte = 135;
+					}
+
+					// TODO Handle Kana and Symbols (bottom half of font).
+
+					bytes.push(byte);
+				}
+
+				// Convert to WebGL data.
+				let floats = new Float32Array(bytes.length * 24);
+				let floatIndex = 0;
+				let x1 = 0;
+				let y1 = 0;
+				let totalWidth = 0;
+
+				/**
+				 * @param {number} x
+				 * @param {number} y
+				 * @param {number} u
+				 * @param {number} v
+				 */
+				let addVertex = (x, y, u, v) => {
+					floats[floatIndex++] = x;
+					floats[floatIndex++] = y;
+					floats[floatIndex++] = u;
+					floats[floatIndex++] = v;
+				}
+
+				for (let i = 0; i < bytes.length; i++) {
+					let byte = bytes[i];
+
+					// note '#'(35) has modified full-width glyph.
+					let charW = byte == 35 ? 6 : byte < 128 ? 4 : 8;
+					let charH = 5;
+
+					let x2 = x1 + charW;
+					let y2 = y1 + charH;
+
+					let u1 = (byte % 16) / 16;
+					let v1 = Math.floor(byte / 16) / 16;
+					let sprW = charW / 128;
+					let sprH = charH / 128;
+					let u2 = u1 + sprW;
+					let v2 = v1 + sprH;
+
+					addVertex(x1, y1, u1, v1);
+					addVertex(x1, y2, u1, v2);
+					addVertex(x2, y2, u2, v2);
+					
+					addVertex(x1, y1, u1, v1);
+					addVertex(x2, y2, u2, v2);
+					addVertex(x2, y1, u2, v1);
+
+					x1 += charW;
+
+					totalWidth += charW;
+					if (i == 0) totalWidth--;
+				}
+
+				const gl = this.gl;
+
+				if (this._watermarkBuffer == null) {
+					this._watermarkBuffer = gl.createBuffer();
+				}
+
+				gl.bindBuffer(gl.ARRAY_BUFFER, this._watermarkBuffer);
+				gl.bufferData(gl.ARRAY_BUFFER, floats, gl.STATIC_DRAW);
+
+				this._watermarkSize = [ totalWidth, 5 ];
+				this._watermarkTriangleCount = bytes.length * 6;
+			}
 		}
 	}
 
@@ -835,6 +975,89 @@ export default class PicoCADViewer {
 			}
 		}
 
+		// Record which framebuffer has the most recent render.
+		this._framebufferCurrent = currFrameBufferTex === this._frameBufferTex ? this._frameBuffer : this._frameBuffer2;
+
+		// Draw watermark
+		if (this._watermarkText) {
+
+			if (!this._fontTex) {
+				let img = lazyLoadedFontImage();
+				if (img) {
+					this._fontTex = this._createTexture(this._fontTex, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+				}
+			}
+
+			if (this._fontTex) {
+				let textProgram = this._programText;
+	
+				textProgram.program.use();
+		
+				gl.bindBuffer(gl.ARRAY_BUFFER, this._watermarkBuffer);
+	
+				gl.vertexAttribPointer(
+					textProgram.program.vertexLocation,
+					2,
+					gl.FLOAT,
+					false,
+					16,
+					0,
+				);
+				gl.enableVertexAttribArray(textProgram.program.vertexLocation);
+	
+				gl.vertexAttribPointer(
+					textProgram.locations.uv,
+					2,
+					gl.FLOAT,
+					false,
+					16,
+					8,
+				);
+				gl.enableVertexAttribArray(textProgram.locations.uv);
+
+				
+				// Set text position.
+				let watermarkPadding = 2;
+
+				gl.uniform4f(textProgram.locations.data,
+					this._resolution[0] / 2 - this._watermarkSize[0] - watermarkPadding,
+					this._resolution[1] / 2 - this._watermarkSize[1] - watermarkPadding,
+					2 / this._resolution[0],
+					-2 / this._resolution[1],
+				);
+				
+				// Set text color.
+				let textColor;
+				let bgColor = this.backgroundColor;
+				
+				if (bgColor) {
+					// Custom color...
+					// Use the lightest/darkest color depending on the brightness of the chosen background.
+					let isLight = luma(bgColor[0], bgColor[1], bgColor[2]) > 0.5;
+					let bestLuma = null;
+					for (let color of this._lightMapColors) {
+						let lu = luma(color[0] / 255, color[1] / 255, color[2] / 255);
+						if (isLight) lu = 1 - lu;
+						if (!textColor || lu > bestLuma) {
+							textColor = color;
+							bestLuma = lu;
+						}
+					}
+				} else {
+					// Use picoCAD method, add 8 to background color index.
+					textColor = this._lightMapColors[(this.model.backgroundIndex + 8) % 16];
+				}
+				
+				gl.uniform4f(textProgram.locations.color, textColor[0] / 255, textColor[1] / 255, textColor[2] / 255, 1);
+	
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, this._fontTex);
+				gl.uniform1i(textProgram.locations.mainTex, 0);
+	
+				gl.drawArrays(gl.TRIANGLES, 0, this._watermarkTriangleCount);
+			}
+		}
+
 		// Render framebuffer to canvas.
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
@@ -1036,17 +1259,18 @@ export default class PicoCADViewer {
 
 		const buffer = new Uint8Array(count * 4);
 		
-		gl.bindFramebuffer(gl.FRAMEBUFFER, this._frameBuffer);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this._framebufferCurrent);
 
 		gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, buffer);
 
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
 		// Create color -> index mapping.
-		const paletteColors = new Map(this.getPalette().map((rgb, i) => [ rgbToInt(rgb), i ]));
+		const palette = this.getPalette();
+		const paletteIntToIndex = new Map(palette.map((rgb, i) => [ rgbToInt(rgb), i ]));
 
 		// The framebuffer has a transparent background, so add transparent -> background-color mapping.
-		paletteColors.set(0, this.backgroundColor ? 16 : this.model.backgroundIndex);
+		paletteIntToIndex.set(0, this.backgroundColor ? palette.length - 1 : this.model.backgroundIndex);
 
 		// Convert.
 		// Note the WebGL buffer is top to bottom.
@@ -1062,7 +1286,7 @@ export default class PicoCADViewer {
 
 			for (let x = 0; x < width; x++) {
 				const int = ints[bufIndex];
-				const index = paletteColors.get(int) ?? 0;
+				const index = paletteIntToIndex.get(int) ?? 0;
 
 				if (scale === 1) {
 					indices[outIndex] = index;
@@ -1120,11 +1344,22 @@ export default class PicoCADViewer {
 		this._programFramebuffer.program.free();
 		this._frameBuffer = null;
 		this._frameBuffer2 = null;
+		this._framebufferCurrent = null;
 		this._frameBufferTex = null;
 		this._frameBufferTex2 = null;
 		this._screenQuads = null;
 		this._depthBuffer = null;
 		this._programFramebuffer = null;
+
+		this._programText.program.free();
+		if (this._watermarkBuffer) {
+			gl.deleteBuffer(this._watermarkBuffer);
+			this._watermarkBuffer = null;
+		}
+		if (this._fontTex) {
+			gl.deleteTexture(this._fontTex);
+			this._fontTex = null;
+		}
 	}
 }
 
@@ -1377,6 +1612,44 @@ function createOutlineProgram(gl) {
 			mainTex: program.getUniformLocation("mainTex"),
 			pixel: program.getUniformLocation("pixel"),
 			outlineColor: program.getUniformLocation("outlineColor"),
+		}
+	};
+}
+
+/**
+ * @param {WebGLRenderingContext} gl 
+ */
+function createTextProgram(gl) {
+	const program = new ShaderProgram(gl, `
+		attribute vec2 vertex;
+		attribute vec2 uv;
+
+		varying highp vec2 v_uv;
+
+		uniform highp vec4 data;
+
+		void main() {
+			v_uv = uv;
+			gl_Position = vec4((data.xy + vertex) * data.zw, 0.0, 1.0);
+		}
+	`, `
+		varying highp vec2 v_uv;
+		
+		uniform sampler2D mainTex;
+		uniform lowp vec4 color;
+
+		void main() {
+			gl_FragColor = texture2D(mainTex, v_uv) * color;
+		}
+	`);
+	
+	return {
+		program: program,
+		locations: {
+			uv: program.getAttribLocation("uv"),
+			data: program.getUniformLocation("data"),
+			mainTex: program.getUniformLocation("mainTex"),
+			color: program.getUniformLocation("color"),
 		}
 	};
 }

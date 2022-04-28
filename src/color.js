@@ -36,3 +36,12 @@ export function rgb255To01(rgb) {
 export function rgb01to255(rgb) {
 	return rgb.map(a => Math.floor(a * 255.999));
 }
+
+/**
+ * @param {number} r
+ * @param {number} g
+ * @param {number} b
+ */
+export function luma(r, g, b) {
+	return r * 0.2126 + g * 0.7152 + b * 0.0722;
+}

@@ -24,6 +24,7 @@ const btnShowControls = /** @type {HTMLButtonElement} */(document.getElementById
 const inputGifFps = /** @type {HTMLInputElement} */(document.getElementById("input-gif-fps"));
 const inputOutlineSize = /** @type {HTMLInputElement} */(document.getElementById("input-outline-size"));
 const inputOutlineColor = /** @type {HTMLInputElement} */(document.getElementById("input-outline-color"));
+const inputWatermark = /** @type {HTMLInputElement} */(document.getElementById("input-watermark"));
 const btnRecordGIF = /** @type {HTMLButtonElement} */(document.getElementById("btn-record-gif"));
 const popupControls = document.getElementById("popup-controls");
 const popupImageOptions = document.getElementById("popup-image-options");
@@ -610,8 +611,12 @@ const inputOutlineSizeHandler = inputHandler(inputOutlineSize, () => {
 	pcv.outlineSize = inputOutlineSize.valueAsNumber;
 });
 
-const inputOutlineColorHandler = inputHandler(inputOutlineColor, () => {
-	pcv.outlineColor = hexToRGB(inputOutlineColor.value);
+const inputOutlineColorHandler = inputHandler(inputOutlineColor, (value) => {
+	pcv.outlineColor = hexToRGB(value);
+});
+
+const inputWatermarkHandler = inputHandler(inputWatermark, (value) => {
+	pcv.setWatermark(value);
 });
 
 btnRecordGIF.onclick = () => {
