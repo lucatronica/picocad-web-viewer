@@ -465,11 +465,67 @@ export default class PicoCADViewer {
 				/** @type {number[]} */
 				let bytes = [];
 
+				let charToByte = {
+					"▮": 16,
+					"■": 17,
+					"□": 18,
+					"⁙": 19,
+					"⁘": 20,
+					"‖": 21,
+					"◀": 22,
+					"▶": 23,
+					"「": 24,
+					"」": 25,
+					"¥": 26,
+					"•": 27,
+					"、": 28,
+					"。": 29,
+					"゛": 30,
+					"゜": 31,
+					"○": 127,
+					"█": 128,
+					"▒": 129,
+					"🐱": 130,
+					"⬇️": 131,
+					"░": 132,
+					"✽": 133,
+					"●": 134,
+					"♥": 135,
+					"❤": 135,
+					"☉": 136,
+					"웃": 137,
+					"🧍‍♀️": 137,
+					"🧍‍♂️": 137,
+					"⌂": 138,
+					"🏠": 138,
+					"⬅️": 139,
+					"🙂": 140,
+					"😐": 140,
+					"♪": 141,
+					"🎵": 141,
+					"🅾️": 142,
+					"◆": 143,
+					"…": 144,
+					"➡️": 145,
+					"★": 146,
+					"⧗": 147,
+					"⏳": 147,
+					"⬆️": 148,
+					"ˇ": 149,
+					"∧": 150,
+					"❎": 151,
+					"▤": 152,
+					"▥": 153,
+					"ー": 254,
+				};
+
 				// Iterate code-points and convert to PICO-8 bytes.
 				for (let cs of s) {
 					let byte = 32;
 
-					if (cs.length === 1) {
+					if (charToByte.hasOwnProperty(cs)) {
+						byte = charToByte[cs];
+					} else if (cs.length === 1) {
 						let code = cs.charCodeAt(0);
 
 						if (code >= 65 && code <= 90) {
@@ -479,13 +535,92 @@ export default class PicoCADViewer {
 							// a-z -> A->Z
 							byte = 65 + (code - 97);
 						} else if (code < 128) {
+							// Other ASCII
 							byte = code;
-						}
-					} else if (cs === "♥") {
-						byte = 135;
-					}
+						} else if (code >= 0xff00 && code <= 0xff5e) {
+							// Fullwidth
+							byte = 32 + (code - 0xff00);
+						} else if (code >= 0x3040 && code <= 0x30ff) {
+							// Kana
+							byte = 154;
 
-					// TODO Handle Kana and Symbols (bottom half of font).
+							// Account for Katakana
+							let isHiragana = true;
+							if (code >= 0x30a0)  {
+								code -= 96;
+								byte = 204;
+								isHiragana = false;
+							}
+
+							if (code <= 0x304A) {
+								// Vowels
+								byte += Math.floor((code - 0x3041) / 2);
+							} else if (code === 0x3063) {
+								// っ
+								byte += 46;
+							} else if (code <= 0x3069) {
+								// か to ぢ
+								if (code > 0x3063) code--;
+
+								code -= 0x304b;
+
+								byte += 5 + Math.floor(code / 2);
+
+								// Dakuten
+								if (code % 2 === 1) {
+									bytes.push(byte);
+									byte = 30;
+								}
+
+								// Handakuten
+							} else if (code <= 0x306e) {
+								// な to の
+								byte += 20 + (code - 0x306a);
+							} else if (code <= 0x307d) {
+								// は to ぽ
+								code -= 0x306f;
+
+								byte += 25 + Math.floor(code / 3);
+
+								// Dakuten
+								if (code % 3 === 1) {
+									bytes.push(byte);
+									byte = 30;
+								}
+
+								// Handakuten
+								if (code % 3 === 2) {
+									bytes.push(byte);
+									byte = 31;
+								}
+							} else if (code <= 0x3082) {
+								// ま to も
+								byte += 30 + (code - 0x307e);
+							} else if (code <= 0x3088) {
+								// ゃ to よ
+								code -= 0x3083;
+
+								byte += 35 + Math.floor(code / 2);
+
+								if (code % 2 === 0) {
+									// Small versions
+									byte += 12;
+								}
+							} else if (code <= 0x308d) {
+								// ら to ろ
+								byte += 38 + (code - 0x3089);
+							} else if (code <= 0x308f) {
+								// ゎ and わ
+								byte += 43;
+							} else if (code === 0x3092) {
+								// を
+								byte += 44;
+							} else if (code === 0x3093) {
+								// ん
+								byte += 45;
+							}
+						}
+					}
 
 					bytes.push(byte);
 				}
