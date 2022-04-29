@@ -39,10 +39,7 @@ export class Pass {
 			this.uvBuffer = gl.createBuffer();
 			this.colorUVBuffer = gl.createBuffer();
 			this.triangleBuffer = gl.createBuffer();
-			
-			if (this.shading) {
-				this.normalBuffer = gl.createBuffer();
-			}
+			this.normalBuffer = gl.createBuffer();
 
 			gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
 			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.vertices), gl.STATIC_DRAW);
@@ -56,10 +53,8 @@ export class Pass {
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.triangleBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.triangles), gl.STATIC_DRAW);
 			
-			if (this.shading) {
-				gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
-				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.normals), gl.STATIC_DRAW);
-			}
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.normals), gl.STATIC_DRAW);
 		}
 
 		this.uvs = null;
@@ -83,10 +78,7 @@ export class Pass {
 		gl.deleteBuffer(this.uvBuffer);
 		gl.deleteBuffer(this.colorUVBuffer);
 		gl.deleteBuffer(this.triangleBuffer);
-		
-		if (this.shading) {
-			gl.deleteBuffer(this.normalBuffer);
-		}
+		gl.deleteBuffer(this.normalBuffer);
 	}
 }
 

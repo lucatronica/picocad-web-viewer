@@ -436,7 +436,7 @@ export default class PicoCADViewer {
 		}
 
 		/** @private */
-		this._hdTex = this._createTexture(this._hdTex, this.gl.RGB, this.gl.RGB, this.gl.UNSIGNED_BYTE, texture);
+		this._hdTex = this._createTexture(this._hdTex, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, texture);
 	}
 
 	removeHDTexture() {
