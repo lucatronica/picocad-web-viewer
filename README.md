@@ -22,8 +22,6 @@ The default picoCAD light-map is a good starting point for customization: ![Defa
 
 [See here for examples of custom light-maps](https://luca.games/picocad/light-maps/).
 
-> Note the GIF export feature will break when using custom light-maps with more than 16 colors.
-
 ## Usage
 
 The model viewer can be freely used in other contexts.
