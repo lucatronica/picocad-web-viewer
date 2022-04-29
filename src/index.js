@@ -387,7 +387,7 @@ export default class PicoCADViewer {
 			// Convert pixels to indices
 			const n = imageData.width * imageData.height;
 			indices = new Uint8Array(n);
-			const colorToIndex = new Map(PICO_COLORS.map(([r, g, b], i) => [ 0xff000000 | (b << 16) | (g << 8) | r, i ]));
+			const colorToIndex = new Map(PICO_COLORS.map(([r, g, b], i) => [ 0xff000000 | (b << 16) | (g << 8) | r, (this.model.alphaIndex === i ? 255 : i) ]));
 			const ints = new Int32Array(src.data.buffer);
 
 			for (let i = 0; i < n; i++) {
@@ -395,6 +395,7 @@ export default class PicoCADViewer {
 				indices[i] = colorToIndex.get(int) ?? 0;
 			}
 		} else {
+			// TODO this does not handle alpha index correctly.
 			// Passed an index array.
 			if (src instanceof Uint8Array) {
 				indices = src;
