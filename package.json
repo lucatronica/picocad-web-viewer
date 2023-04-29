@@ -7,8 +7,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "rollup -c",
-    "build-demo": "rollup --config rollup.config-demo.js",
-    "watch-demo": "rollup --config rollup.config-demo.js --watch --environment BUILD:development"
+    "build-demo": "rollup --config rollup.config-demo.mjs",
+    "watch-demo": "rollup --config rollup.config-demo.mjs --watch --environment BUILD:development"
   },
   "repository": {
     "type": "git",
@@ -29,7 +29,7 @@
     "gl-matrix": "^3.3.0"
   },
   "devDependencies": {
-    "rollup": "^2.41.2",
-    "rollup-plugin-terser": "^7.0.2"
+    "rollup": "^3.21.0",
+    "@rollup/plugin-terser": "^0.4.1"
   }
 }
