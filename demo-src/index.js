@@ -1,6 +1,5 @@
 import PicoCADViewer from "../src/index";
 import { urlCompressModel, urlDecompressModel } from "./model-compression";
-import { GIFEncoder } from "./gifenc";
 import { PICO_COLORS } from "../src/pico";
 
 // Get elements
@@ -26,9 +25,33 @@ const inputOutlineSize = /** @type {HTMLInputElement} */(document.getElementById
 const inputOutlineColor = /** @type {HTMLInputElement} */(document.getElementById("input-outline-color"));
 const inputWatermark = /** @type {HTMLInputElement} */(document.getElementById("input-watermark"));
 const btnRecordGIF = /** @type {HTMLButtonElement} */(document.getElementById("btn-record-gif"));
+const gifStatusEl = /** @type {HTMLButtonElement} */(document.getElementById("gif-status"));
 const popupControls = document.getElementById("popup-controls");
 const popupImageOptions = document.getElementById("popup-image-options");
 const statsTable = document.getElementById("stats");
+
+// Load worker.
+let worker = new Worker("worker.js");
+let workerLoaded = false;
+
+worker.onmessage = (event) => {
+	let data = event.data;
+
+	// Handle response to message.
+	let type = data.type;
+
+	if (type === "gif") {
+		gifStatusEl.hidden = true;
+		
+		downloadGif(data.data);
+	}
+
+	// Once loaded, enabled recording etc.
+	if (!workerLoaded) {
+		workerLoaded = true;
+		btnRecordGIF.disabled = false;
+	}
+};
 
 // Create viewer
 const pcv = new PicoCADViewer({
@@ -259,10 +282,8 @@ popupControls.querySelectorAll("kbd").forEach(kbd => {
 // GIF recording
 
 const GIF_MAX_LEN = 30; // seconds
-const gifRecorder = new GIFEncoder();
 
-/** @type {import("./gifenc").GIFPalette} */
-let gifPalette = [];
+/** Delay between frames in seconds. */
 let gifDelay = 0.02;
 let gifRecording = false;
 let gifTime = 0;
@@ -294,42 +315,48 @@ function stopRecordingGif() {
 	btnRecordGIF.classList.remove("recording");
 	viewportCanvas.classList.remove("recording");
 	inputGifFps.disabled = false;
+	gifStatusEl.hidden = false;
 
-	// Render GIF
-	const res = pcv.getResolution();
-
-	// Get the palette
-	gifPalette = pcv.getPalette().slice();
-
+	// Render GIF in worker.
+	let resolution = pcv.getResolution();
+	let background = pcv.getRenderedBackgroundColor();
+	let palette = null;
 	let transparentIndex = -1;
 
-	// Handle transparent background
-	if (pcv.backgroundColor != null && pcv.backgroundColor[3] < 1) {
-		// A bit hacky, we know that the background index is at the end.
-		transparentIndex = gifPalette.length - 1;
+	// If possible, determine the global color palette.
+	if (!pcv.hasHDTexture()) {
+		palette = pcv.getPalette();
+
+		if (palette.length > 256) {
+			palette = null;
+		} else {
+			// Have a palette, handle transparent background index.
+			// A bit hacky, we know that the background index is at the end of the `pcv.getPalette()` array.
+			if (pcv.backgroundColor != null && pcv.backgroundColor[3] < 1) {
+				transparentIndex = palette.length - 1;
+			}
+		}
 	}
-
-	for (let i = 0; i < gifFrames.length; i++) {
-		gifRecorder.writeFrame(gifFrames[i], res.width * res.scale, res.height * res.scale, {
-			palette: i === 0 ? gifPalette : null,
-			delay: gifDelay * 1000,
-			transparent: transparentIndex >= 0,
-			transparentIndex: transparentIndex,
-		});
-	}
-
-	gifRecorder.finish();
-
-	downloadGif();
-
-	gifRecorder.reset();
-	gifFrames = [];
+	
+	worker.postMessage({
+		type: "generate",
+		width: resolution.width,
+		height: resolution.height,
+		scale: resolution.scale,
+		delay: Math.round(gifDelay * 1000),
+		background: background,
+		palette: palette,
+		transparentIndex: transparentIndex,
+	});
 }
 
-function downloadGif() {
+/**
+ * @param {Uint8Array} bytes
+ */
+function downloadGif(bytes) {
 	const fileName = `${pcv.model.name}.gif`;
 
-	const file = new File([ gifRecorder.bytesView() ], fileName, {
+	const file = new File([ bytes ], fileName, {
 		type: "image/gif",
 	});
 
@@ -347,14 +374,16 @@ function downloadGif() {
 	console.log(`downloaded ${fileName} ${file.size / 1024}kb`);
 }
 
-/** @type {Uint8Array[]} */
-let gifFrames = [];
+// /** @type {{ scale: number, indices?: Uint8Array, pixels?: Uint8Array }[]} */
+// let gifFrames = [];
 
 function putGifFrame() {
-	const res = pcv.getResolution();
-	const indices = pcv.getPixelIndices(res.scale);
+	let data = pcv.getPixels();
 
-	gifFrames.push(indices);
+	worker.postMessage({
+		type: "frame",
+		data: data,
+	}, [ data.buffer ]);
 }
 
 

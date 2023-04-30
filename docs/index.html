@@ -109,6 +109,9 @@
 			transition: background-color 0.15s, border-color 0.15s;
 			cursor: pointer;
 		}
+		select:disabled, button:disabled {
+			pointer-events: none;
+		}
 		select {
 			-webkit-appearance: none;
 			border: none;
@@ -124,8 +127,8 @@
 			border: 1px solid var(--border);
 			border-radius: 3px;
 		}
-		button:hover {
-			border-color: var(--accent);
+		button:disabled {
+			opacity: 0.5;
 		}
 		input[type="number"], input[type="text"] {
 			padding: 3px 7px;
@@ -187,6 +190,11 @@
 			border: none;
 			border-bottom: 2px dotted var(--border);
 			margin: 10px auto;
+		}
+
+		#gif-status {
+			color: var(--fg2);
+			padding-left: 4px;
 		}
 
 		#stats {
@@ -374,7 +382,8 @@
 							<option value="5">20</option>
 						</select>
 					</label>
-					<button id="btn-record-gif">Record GIF</button>
+					<button id="btn-record-gif" disabled>Record GIF</button>
+					<span id="gif-status" hidden>Rendering GIF...</span>
 				</div>
 				<div>
 					<label>

@@ -1,0 +1,8 @@
+{
+	"compilerOptions": {
+		"checkJs": true,
+		"target": "es2019",
+		"lib": [ "ES2019", "WebWorker" ]
+	},
+	"include": [ "./**/*" ]
+}

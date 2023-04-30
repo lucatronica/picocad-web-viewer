@@ -9,7 +9,7 @@ export class GIFEncoder {
 	 */
 	stream: {
 		writeByte(byte: number): void;
-		writeBytes(array: Uint8Array, offset: number, byteLength: number);
+		writeBytes(array: Uint8Array, offset: number, byteLength: number): void;
 	};
 
 	constructor(options?: {
@@ -116,13 +116,32 @@ export class GIFEncoder {
 export default GIFEncoder;
 
 /**
+ * Given the image contained by `rgba`, this method will quantize the total number of colors down to a reduced palette no greater than `maxColors`.
+ * @param rgba A flat Uint8Array or Uint8ClampedArray of per-pixel RGBA data.
+ * @param format Defaults to "rgb565".
+ * @returns An index array (each one byte) length equal to rgba.length / 4.
+ */
+export function quantize(rgba: Uint8Array | Uint8ClampedArray, maxColors: number, options?: {
+	/** Defaults to "rgb565". */
+	format?: GIFFormat | null;
+	/** Defaults to false. if alpha format is selected, this will go through all quantized RGBA colors and set their alpha to either 0x00 if the alpha is less than or equal to 127, otherwise it will be set to 0xFF. You can specify a number here instead of a boolean to use a specific 1-bit alpha threshold. */
+	oneBitAlpha?: boolean | number | null;
+	/** Defaults to true. if alpha format is selected and the quantized color is below `clearAlphaThreshold`, it will be replaced with `clearAlphaColor` (i.e. RGB colors with 0 opacity will be replaced with pure black). */
+	clearAlpha?: boolean | null;
+	/** Defaults to 0. If alpha and `clearAlpha` is enabled, and a quantized pixel has an alpha below or equal to this value, its RGB values will be set to `clearAlphaColor` */
+	clearAlphaThreshold?: number;
+	/** Defaults to `0x00`. if alpha and `clearAlpha` is enabled and a quantized pixel is being cleared, this is the color its RGB channels will be cleared to (typically you will choose `0x00` or `0xff`). */
+	clearAlphaColor?: number;
+}): GIFPalette;
+
+/**
  * This will determine the color index for each pixel in the rgba image.
  * @param rgbaBytes A flat Uint8Array or Uint8ClampedArray of per-pixel RGBA data.
  * @param palette 
  * @param format Defaults to "rgb565".
  * @returns An index array (each one byte) length equal to rgba.length / 4.
  */
-export function applyPalette(rgbaBytes: Uint8Array, palette: GIFPalette, format?: GIFFormat): Uint8Array;
+export function applyPalette(rgba: Uint8Array | Uint8ClampedArray, palette: GIFPalette, format?: GIFFormat): Uint8Array;
 
 /**
  * `rgb565`: 5 bits red, 6 bits green, 5 bits blue (better quality, slower).

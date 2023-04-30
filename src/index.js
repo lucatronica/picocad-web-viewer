@@ -291,6 +291,13 @@ export default class PicoCADViewer {
 		// Convert existing palette to RGBA
 		let colors = this._lightMapColors.map(color => [color[0], color[1], color[2], 255]);
 
+		// Add wireframe color.
+		if (this.drawWireframe) {
+			const wireframe = rgb01to255(this.wireframeColor);
+			if (wireframe.length != 4) wireframe.push(255);
+			colors.push(wireframe);
+		}
+
 		// Add custom outline.
 		if (this.outlineSize >= 1) {
 			const outline = rgb01to255(this.outlineColor);
@@ -306,6 +313,25 @@ export default class PicoCADViewer {
 		}
 
 		return colors;
+	}
+
+	/**
+	 * Get the effective RGBA255 background color.
+	 * @returns {number[]} As [ R, G, B, A ] (each component 0 to 255).
+	 */
+	getRenderedBackgroundColor() {
+		if (this.backgroundColor == null) {
+			const bgColor = this._lightMapColors[this.model.backgroundIndex];
+			
+			return [ bgColor[0], bgColor[1], bgColor[2], 255 ];
+		} else {
+			return [
+				Math.floor(this.backgroundColor[0] * 255.999 ),
+				Math.floor(this.backgroundColor[1] * 255.999 ),
+				Math.floor(this.backgroundColor[2] * 255.999 ),
+				this.backgroundColor.length <= 3 ? 255 : Math.floor(this.backgroundColor[3] * 255.999 ),
+			];
+		}
 	}
 
 	/**
@@ -437,6 +463,10 @@ export default class PicoCADViewer {
 
 		/** @private */
 		this._hdTex = this._createTexture(this._hdTex, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, texture);
+	}
+
+	hasHDTexture() {
+		return this._hdTex != null;
 	}
 
 	removeHDTexture() {
@@ -1383,7 +1413,30 @@ export default class PicoCADViewer {
 	}
 
 	/**
-	 * Get the rendered pixels as PICO-8 indices (top to bottom, left to right).
+	 * Get the rendered pixel data, row-by-row, bottom to top (i.e. upsidedown).  
+	 * This data is not up-scaled to match the view scale.
+	 * 
+	 * By default this only works if called right after the frame is drawn (e.g. after `draw()` or in the post draw callback of `startDrawLoop()`).  
+	 * Set `preserveDrawingBuffer: true` in the viewer options to allow calling this method asynchronously.
+	 * @returns {Uint8Array} A new buffer containing the pixel data.
+	 */
+	getPixels() {
+		const gl = this.gl;
+		const [width, height] = this._resolution;
+		const count = width * height;
+		const buffer = new Uint8Array(count * 4);
+		
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this._framebufferCurrent);
+
+		gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, buffer);
+
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+		return buffer;
+	}
+
+	/**
+	 * Get the rendered pixels as PICO-8 indices (row-by-row, top to bottom).
 	 * 
 	 * By default this only works if called right after the frame is drawn (e.g. after `draw()` or in the post draw callback of `startDrawLoop()`).
 	 * 
